@@ -455,8 +455,56 @@ app.get("/api/config", (req, res) => {
   });
 });
 
-// Session Store for Owner Authentication
-const activeSessions = new Map<string, { email: string; expires: number }>();
+// Stateless owner authentication for serverless deployments.
+// Vercel functions do not share memory, so owner sessions must be signed tokens.
+type OwnerSession = { email: string; expires: number };
+const OWNER_SESSION_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
+const getOwnerSessionSecret = () => process.env.OWNER_SESSION_SECRET;
+
+const signOwnerSession = (email: string) => {
+  const secret = getOwnerSessionSecret();
+  if (!secret) return null;
+  const payload: OwnerSession = {
+    email,
+    expires: Date.now() + OWNER_SESSION_MAX_AGE_MS
+  };
+  const encodedPayload = Buffer.from(JSON.stringify(payload)).toString("base64url");
+  const signature = crypto.createHmac("sha256", secret).update(encodedPayload).digest("base64url");
+  return `${encodedPayload}.${signature}`;
+};
+
+const verifyOwnerSession = (token: string | null): OwnerSession | null => {
+  const secret = getOwnerSessionSecret();
+  if (!token || !secret) return null;
+  const [encodedPayload, signature] = token.split(".");
+  if (!encodedPayload || !signature) return null;
+
+  const expectedSignature = crypto.createHmac("sha256", secret).update(encodedPayload).digest("base64url");
+  const signatureBuffer = Buffer.from(signature);
+  const expectedBuffer = Buffer.from(expectedSignature);
+  if (signatureBuffer.length !== expectedBuffer.length || !crypto.timingSafeEqual(signatureBuffer, expectedBuffer)) {
+    return null;
+  }
+
+  try {
+    const session = JSON.parse(Buffer.from(encodedPayload, "base64url").toString("utf8")) as OwnerSession;
+    if (!session.email || !session.expires || session.expires < Date.now()) return null;
+    if (process.env.OWNER_EMAIL && session.email !== process.env.OWNER_EMAIL) return null;
+    return session;
+  } catch {
+    return null;
+  }
+};
+
+const setOwnerSessionCookie = (res: express.Response, token: string) => {
+  res.cookie("owner_session", token, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production" || process.env.VERCEL === "1",
+    sameSite: "strict",
+    maxAge: OWNER_SESSION_MAX_AGE_MS
+  });
+};
 
 const getSessionToken = (req: express.Request) => {
   // Try Authorization header first
@@ -479,9 +527,8 @@ const requireOwnerAuth = (req: express.Request, res: express.Response, next: exp
   if (!token) {
     return res.status(401).json({ error: "Unauthorized. Owner session token missing." });
   }
-  const session = activeSessions.get(token);
-  if (!session || session.expires < Date.now()) {
-    if (token) activeSessions.delete(token);
+  const session = verifyOwnerSession(token);
+  if (!session) {
     res.clearCookie("owner_session");
     return res.status(401).json({ error: "Unauthorized. Session expired or invalid." });
   }
@@ -494,9 +541,8 @@ app.get("/api/auth/owner/me", (req, res) => {
   if (!token) {
     return res.status(401).json({ authenticated: false, error: "No active session." });
   }
-  const session = activeSessions.get(token);
-  if (!session || session.expires < Date.now()) {
-    if (token) activeSessions.delete(token);
+  const session = verifyOwnerSession(token);
+  if (!session) {
     res.clearCookie("owner_session");
     return res.status(401).json({ authenticated: false, error: "Session expired." });
   }
@@ -508,25 +554,21 @@ app.post("/api/auth/owner/login", (req, res) => {
   const { email, password } = req.body;
   const ownerEmail = process.env.OWNER_EMAIL;
   const ownerPassword = process.env.OWNER_PASSWORD;
+  const ownerSessionSecret = getOwnerSessionSecret();
 
-  if (!ownerEmail || !ownerPassword) {
+  if (!ownerEmail || !ownerPassword || !ownerSessionSecret) {
     return res.status(500).json({ 
       success: false, 
-      error: "Owner credentials are not configured on the server. Please define OWNER_EMAIL and OWNER_PASSWORD in the environment variables." 
+      error: "Owner credentials are not configured on the server. Please define OWNER_EMAIL, OWNER_PASSWORD, and OWNER_SESSION_SECRET in the environment variables." 
     });
   }
 
   if (email === ownerEmail && password === ownerPassword) {
-    const token = crypto.randomBytes(32).toString("hex");
-    const expires = Date.now() + 24 * 60 * 60 * 1000; // 24 hours
-    activeSessions.set(token, { email: ownerEmail, expires });
-    
-    res.cookie("owner_session", token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "strict",
-      maxAge: 24 * 60 * 60 * 1000
-    });
+    const token = signOwnerSession(ownerEmail);
+    if (!token) {
+      return res.status(500).json({ success: false, error: "Owner session signing is not configured." });
+    }
+    setOwnerSessionCookie(res, token);
     
     return res.json({ success: true, token, email: ownerEmail });
   }
@@ -539,22 +581,18 @@ app.post("/api/admin/login", (req, res) => {
   const { email, password } = req.body;
   const ownerEmail = process.env.OWNER_EMAIL;
   const ownerPassword = process.env.OWNER_PASSWORD;
+  const ownerSessionSecret = getOwnerSessionSecret();
 
-  if (!ownerEmail || !ownerPassword) {
+  if (!ownerEmail || !ownerPassword || !ownerSessionSecret) {
     return res.status(500).json({ success: false, error: "Owner credentials are not configured on the server." });
   }
 
   if (email === ownerEmail && password === ownerPassword) {
-    const token = crypto.randomBytes(32).toString("hex");
-    const expires = Date.now() + 24 * 60 * 60 * 1000;
-    activeSessions.set(token, { email: ownerEmail, expires });
-    
-    res.cookie("owner_session", token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "strict",
-      maxAge: 24 * 60 * 60 * 1000
-    });
+    const token = signOwnerSession(ownerEmail);
+    if (!token) {
+      return res.status(500).json({ success: false, error: "Owner session signing is not configured." });
+    }
+    setOwnerSessionCookie(res, token);
     
     return res.json({ success: true, token, email: ownerEmail });
   }
@@ -564,10 +602,6 @@ app.post("/api/admin/login", (req, res) => {
 
 // Owner Logout Endpoint
 app.post("/api/auth/owner/logout", (req, res) => {
-  const token = getSessionToken(req);
-  if (token) {
-    activeSessions.delete(token);
-  }
   res.clearCookie("owner_session");
   return res.json({ success: true, message: "Logged out successfully" });
 });
