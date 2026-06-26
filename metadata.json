@@ -1,0 +1,6 @@
+{
+  "name": "The Carnivore AI Voice Dashboard",
+  "description": "An operational and customer dashboard for The Carnivore restaurant featuring Zara, an AI voice assistant for food orders and table reservations.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
