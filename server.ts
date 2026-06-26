@@ -16,14 +16,30 @@ const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseAnonKey = process.env.SUPABASE_ANON_KEY;
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-const isSupabaseConfigured = !!(supabaseUrl && (supabaseAnonKey || supabaseServiceRoleKey) && supabaseUrl !== "https://your-supabase-project.supabase.co");
-
 // Server-side uses service role key if available to bypass RLS securely, otherwise falls back to anon key
 const supabaseKeyToUse = supabaseServiceRoleKey || supabaseAnonKey;
 
-const supabase = isSupabaseConfigured 
-  ? createClient(supabaseUrl!, supabaseKeyToUse!) 
-  : null;
+function isUsableSupabaseUrl(value?: string) {
+  if (!value || value === "https://your-supabase-project.supabase.co") return false;
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "https:" && parsed.hostname.length > 0;
+  } catch {
+    return false;
+  }
+}
+
+let isSupabaseConfigured = false;
+let supabase: any = null;
+
+if (isUsableSupabaseUrl(supabaseUrl) && supabaseKeyToUse) {
+  try {
+    supabase = createClient(supabaseUrl!, supabaseKeyToUse);
+    isSupabaseConfigured = true;
+  } catch (error) {
+    console.warn("Supabase credentials are present but invalid. Falling back to robust in-memory server database.", error);
+  }
+}
 
 const missingTables = new Set<string>();
 
