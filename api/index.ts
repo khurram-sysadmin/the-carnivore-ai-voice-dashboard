@@ -4,7 +4,7 @@ let appPromise: Promise<any> | null = null;
 
 function getApp() {
   if (!appPromise) {
-    appPromise = import("../server").then((module) => module.default);
+    appPromise = import("../server.js").then((module) => module.default);
   }
   return appPromise;
 }
