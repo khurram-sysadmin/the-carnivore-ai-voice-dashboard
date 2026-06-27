@@ -65,7 +65,7 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
     }
   };
 
-  // Clean up on component unmount
+  // Clean up visualizer on component unmount
   useEffect(() => {
     return () => {
       cleanupAudioVisualizer();
@@ -138,6 +138,17 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
     }
   });
 
+  // Clean up ElevenLabs session on component unmount
+  useEffect(() => {
+    return () => {
+      try {
+        conversation.endSession();
+      } catch (err) {
+        console.error("Error ending ElevenLabs session on unmount:", err);
+      }
+    };
+  }, [conversation]);
+
   // Handle pre-selected trigger actions from outer buttons (e.g. "Place Order", "Book Table")
   useEffect(() => {
     if (preSelectedAction) {
@@ -157,44 +168,62 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
   // Drive Waveform Animations using ElevenLabs' actual voice levels/states and Web Audio Analyser
   useEffect(() => {
     if (conversation.status === 'connected') {
-      const updateWaves = () => {
-        const isZaraSpeaking = conversation.isSpeaking;
-        
-        if (isZaraSpeaking) {
-          // If Zara is speaking, show beautiful sweeping AI waves
-          const time = Date.now() * 0.015;
-          setAudioNodes(prev => prev.map((prevVal, i) => {
-            const base = Math.sin(time + i * 0.5) * 25 + 30;
-            const noise = Math.random() * 12;
-            const target = Math.max(8, Math.min(65, base + noise));
-            return prevVal * 0.65 + target * 0.35;
-          }));
-        } else if (analyserRef.current && dataArrayRef.current) {
-          // If customer is speaking, analyze microphone input in real-time
-          analyserRef.current.getByteFrequencyData(dataArrayRef.current);
+      let lastTime = 0;
+      const fpsLimit = 24; // Throttle to 24fps to prevent UI thread overload
+      const interval = 1000 / fpsLimit;
+
+      const updateWaves = (timestamp: number) => {
+        if (!lastTime) lastTime = timestamp;
+        const elapsed = timestamp - lastTime;
+
+        if (elapsed >= interval) {
+          lastTime = timestamp - (elapsed % interval);
+
+          // Respect prefers-reduced-motion - bypass animation state updates entirely
+          if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+            setAudioNodes([15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15]);
+            animationFrameRef.current = requestAnimationFrame(updateWaves);
+            return;
+          }
+
+          const isZaraSpeaking = conversation.isSpeaking;
           
-          const frequencies = dataArrayRef.current;
-          const length = frequencies.length;
-          
-          setAudioNodes(prev => prev.map((prevVal, i) => {
-            // Map the 15 bars to the available voice frequency bins
-            const binIdx = Math.floor((i / prev.length) * (length * 0.6));
-            const rawVal = frequencies[binIdx] || 0;
-            // Scale and map to comfortable pixel heights (between 8px and 65px)
-            const mappedVal = (rawVal / 255) * 55 + 8;
-            // Add a tiny bit of ambient dynamic vibration even on silence to show active stream
-            const noise = Math.sin(Date.now() * 0.008 + i) * 1.5 + 3;
-            const target = Math.max(8, Math.min(65, mappedVal + noise));
-            return prevVal * 0.65 + target * 0.35;
-          }));
-        } else {
-          // Idle breathing pulse when nobody is speaking
-          const time = Date.now() * 0.003;
-          setAudioNodes(prev => prev.map((prevVal, i) => {
-            const height = Math.sin(time + i * 0.4) * 3 + 12;
-            const target = Math.max(8, height);
-            return prevVal * 0.75 + target * 0.25;
-          }));
+          if (isZaraSpeaking) {
+            // If Zara is speaking, show beautiful sweeping AI waves
+            const time = Date.now() * 0.015;
+            setAudioNodes(prev => prev.map((prevVal, i) => {
+              const base = Math.sin(time + i * 0.5) * 25 + 30;
+              const noise = Math.random() * 12;
+              const target = Math.max(8, Math.min(65, base + noise));
+              return prevVal * 0.65 + target * 0.35;
+            }));
+          } else if (analyserRef.current && dataArrayRef.current) {
+            // If customer is speaking, analyze microphone input in real-time
+            analyserRef.current.getByteFrequencyData(dataArrayRef.current);
+            
+            const frequencies = dataArrayRef.current;
+            const length = frequencies.length;
+            
+            setAudioNodes(prev => prev.map((prevVal, i) => {
+              // Map the 15 bars to the available voice frequency bins
+              const binIdx = Math.floor((i / prev.length) * (length * 0.6));
+              const rawVal = frequencies[binIdx] || 0;
+              // Scale and map to comfortable pixel heights (between 8px and 65px)
+              const mappedVal = (rawVal / 255) * 55 + 8;
+              // Add a tiny bit of ambient dynamic vibration even on silence to show active stream
+              const noise = Math.sin(Date.now() * 0.008 + i) * 1.5 + 3;
+              const target = Math.max(8, Math.min(65, mappedVal + noise));
+              return prevVal * 0.65 + target * 0.35;
+            }));
+          } else {
+            // Idle breathing pulse when nobody is speaking
+            const time = Date.now() * 0.003;
+            setAudioNodes(prev => prev.map((prevVal, i) => {
+              const height = Math.sin(time + i * 0.4) * 3 + 12;
+              const target = Math.max(8, height);
+              return prevVal * 0.75 + target * 0.25;
+            }));
+          }
         }
         
         animationFrameRef.current = requestAnimationFrame(updateWaves);
@@ -217,6 +246,10 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
 
   // Start the voice call
   const handleStartCall = async () => {
+    if (callState.status === 'connecting' || callState.status === 'active') {
+      console.warn("Call start bypassed: session already connecting or active.");
+      return;
+    }
     setCallState({ status: 'connecting', message: 'Requesting microphone access...' });
     setTranscript([]);
     callStartTime.current = null;

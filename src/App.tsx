@@ -4,7 +4,7 @@ import {
   Sparkles, Phone, ShoppingBag, Calendar, ListCollapse, AlertTriangle, ShieldCheck, 
   Search, Filter, Plus, Check, RefreshCw, Star, MessageSquare, AlertCircle, Eye, 
   ArrowRight, LogIn, LogOut, ChevronRight, CheckCircle2, TrendingUp, DollarSign, Users, 
-  Clock, X, ChevronDown, UserCircle, LayoutGrid, PhoneCall, Play, Pause, Volume2, Cpu, Zap, ThumbsUp
+  Clock, X, ChevronDown, UserCircle, LayoutGrid, PhoneCall, Play, Pause, Volume2, Cpu, Zap, ThumbsUp, Info
 } from 'lucide-react';
 
 import { Order, Reservation, MenuItem, ActivityEvent, FeedbackItem, EscalationItem, OrderStatus, ReservationStatus, CallLog } from './types';
@@ -21,6 +21,7 @@ import MenuManagement from './components/MenuManagement';
 import OwnerSidebar from './components/OwnerSidebar';
 import MobileNav from './components/MobileNav';
 import CarnivoreLogo from './components/CarnivoreLogo';
+import { formatReservationDate } from './utils/date';
 
 const containerVariants = {
   hidden: { opacity: 0 },
@@ -148,6 +149,7 @@ export default function App() {
   const [fbRating, setFbRating] = useState(5);
   const [fbComment, setFbComment] = useState('');
   const [fbSuccess, setFbSuccess] = useState(false);
+  const [showElevenLabsChecklist, setShowElevenLabsChecklist] = useState(false);
 
   const showToast = (msg: string, type: 'success' | 'error' = 'success') => {
     setToast({ show: true, msg, type });
@@ -1189,7 +1191,53 @@ export default function App() {
                     />
                   </motion.div>
                 </motion.div>
-
+ 
+                {/* ElevenLabs Diagnostics & Setup Latency Checklist (Admin Only) */}
+                <div className="bg-white border border-zinc-200 rounded-2xl p-5 shadow-sm">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2 mt-0.5">
+                      <Cpu className="w-5 h-5 text-red-500" />
+                      <div>
+                        <h3 className="font-bold text-sm text-zinc-900 leading-none">Voice Agent Diagnostics & Latency Setup</h3>
+                        <p className="text-[10px] text-zinc-400 mt-1.5">Configure your ElevenLabs Conversational Voice Agent for optimal latency & stability.</p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => setShowElevenLabsChecklist(!showElevenLabsChecklist)}
+                      className="px-3 py-1.5 bg-zinc-50 border hover:bg-zinc-100 border-zinc-200 text-zinc-650 rounded-xl text-xs font-bold transition-all cursor-pointer"
+                    >
+                      {showElevenLabsChecklist ? "Hide Panel" : "View Settings Checklist"}
+                    </button>
+                  </div>
+ 
+                  {showElevenLabsChecklist && (
+                    <div className="mt-4 border-t border-zinc-100 pt-4 grid grid-cols-1 md:grid-cols-2 gap-6 text-xs text-zinc-600 leading-relaxed">
+                      <div className="space-y-3">
+                        <h4 className="font-bold text-zinc-900 flex items-center gap-1.5">
+                          <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                          Recommended Console Settings
+                        </h4>
+                        <ul className="space-y-2 pl-4 list-disc">
+                          <li><strong>Agent Model:</strong> Choose <code>gemini-2.5-flash</code> or similar low-latency LLMs on the ElevenLabs Agent Console.</li>
+                          <li><strong>Voice Latency Mode:</strong> Select voice options optimized for low-latency WebRTC streams.</li>
+                          <li><strong>Streaming Options:</strong> Ensure streaming is enabled in voice output configurations.</li>
+                          <li><strong>Stable Mic:</strong> Check client device microphone sample rate matches standard 44.1kHz or 48kHz to avoid cutting.</li>
+                        </ul>
+                      </div>
+                      <div className="space-y-3">
+                        <h4 className="font-bold text-zinc-900 flex items-center gap-1.5">
+                          <Info className="w-4 h-4 text-amber-500" />
+                          Network & Production Precautions
+                        </h4>
+                        <ul className="space-y-2 pl-4 list-disc">
+                          <li><strong>Production Webhook:</strong> Use static production endpoints for final confirmations. Avoid debugging tools/proxies in active setups which cause packet buffering delays.</li>
+                          <li><strong>Network Jitter:</strong> Audio cutting is frequently due to local regional ISP latency or packet drops. WebRTC relies heavily on stable client-side network connections.</li>
+                        </ul>
+                      </div>
+                    </div>
+                  )}
+                </div>
+ 
                 {/* Main Dashboard section: orders/timeline divide */}
                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
                   
@@ -1442,7 +1490,7 @@ export default function App() {
                       </div>
                       <div>
                         <p className="text-sm font-bold text-zinc-900">Table for {res.party_size} guests</p>
-                        <p className="text-xs text-zinc-500 mt-1">{res.customer_name} • {res.reservation_date} at {res.reservation_time}</p>
+                        <p className="text-xs text-zinc-500 mt-1">{res.customer_name} • {formatReservationDate(res.reservation_date)} at {res.reservation_time}</p>
                       </div>
                       {res.special_requests && (
                         <p className="text-xs italic bg-zinc-50 p-2 rounded text-zinc-500">"{res.special_requests}"</p>

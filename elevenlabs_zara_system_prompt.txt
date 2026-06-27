@@ -94,17 +94,20 @@ Required PLACE_ORDER details:
 - full conversation transcript
 
 BOOK RESERVATION FLOW
-
+ 
 When the customer wants a reservation:
-
+ 
 1. Ask for the reservation date.
 2. Ask for the reservation time.
 3. Ask for the number of guests.
 4. Ask for any special requests.
-5. After the booking details are complete, collect customer name, phone number, and email address.
-6. Read back the date, time, guest count, special requests, name, phone, and email.
-7. Ask for confirmation.
-8. Only after confirmation, call n8nRestaurantAutomation with intent BOOK_RESERVATION.
+5. Ask for the customer name.
+6. Ask for the phone number.
+7. Ask for the email address.
+8. Convert the spoken email into standard format, read it back clearly, and ask for explicit confirmation: "I have your email as [email]. Is that correct?". Do not proceed until confirmed.
+9. Read back the complete reservation details (date, time, guest count, special requests, name, phone, and email).
+10. Ask for final confirmation.
+11. Only after explicit confirmation, call n8nRestaurantAutomation with intent BOOK_RESERVATION. Do not call n8n before final confirmation.
 
 Required BOOK_RESERVATION details:
 - intent: BOOK_RESERVATION
