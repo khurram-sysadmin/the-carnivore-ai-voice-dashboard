@@ -1,20 +1,29 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
-</div>
+# The Carnivore AI Voice Dashboard
 
-# Run and deploy your AI Studio app
+Dashboard for The Carnivore's Zara agent.
 
-This contains everything you need to run your app locally.
+Zara conversations run through ElevenLabs, not Gemini:
 
-View your app in AI Studio: https://ai.studio/apps/4cce4ea4-fe98-495b-9954-d2db1bcb43cb
+- Voice calls use the ElevenLabs Conversational AI browser session.
+- Text chat uses the same ElevenLabs agent in `textOnly` mode.
+- Completed customer actions are handled by the n8n workflow and stored in Supabase.
 
-## Run Locally
-
-**Prerequisites:**  Node.js
-
+## Local Setup
 
 1. Install dependencies:
    `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
+2. Copy `.env.example` to `.env` and set the required values:
+   - `ELEVENLABS_AGENT_ID`
+   - `ELEVENLABS_API_KEY`
+   - `SUPABASE_URL`
+   - `SUPABASE_ANON_KEY`
+   - `SUPABASE_SERVICE_ROLE_KEY`
+   - `OWNER_EMAIL`
+   - `OWNER_PASSWORD`
+   - `OWNER_SESSION_SECRET`
 3. Run the app:
    `npm run dev`
+
+## Build
+
+Run `npm run build` before deploying.

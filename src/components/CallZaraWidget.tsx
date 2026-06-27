@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Phone, PhoneOff, Sparkles, RefreshCw, CheckCircle2, AlertCircle, Info, Volume2, VolumeX, Mic, MessageSquare, Send, Loader2 } from 'lucide-react';
+import { Phone, PhoneOff, Sparkles, RefreshCw, CheckCircle2, AlertCircle, Volume2, VolumeX, Mic, MessageSquare, Send, Loader2 } from 'lucide-react';
 import { useConversation } from '@elevenlabs/react';
 
 interface CallZaraWidgetProps {
@@ -27,12 +27,15 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
     { role: 'zara', content: 'Hi, thanks for calling The Carnivore. How can I help you today?' }
   ]);
   const [chatLoading, setChatLoading] = useState(false);
+  const [chatSessionState, setChatSessionState] = useState<'idle' | 'connecting' | 'connected' | 'failed'>('idle');
   const chatBottomRef = useRef<HTMLDivElement | null>(null);
   
-  const waveInterval = useRef<NodeJS.Timeout | null>(null);
   const callStartTime = useRef<number | null>(null);
   const isCallLogSaved = useRef<boolean>(false);
   const transcriptRef = useRef<{ speaker: 'Zara' | 'You'; text: string }[]>([]);
+  const voiceConversationRef = useRef<any>(null);
+  const sessionModeRef = useRef<'voice' | 'chat' | null>(null);
+  const pendingChatMessageRef = useRef<string | null>(null);
 
   // Web Audio API refs for real-time mic reactive wave animation
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -65,13 +68,6 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
     }
   };
 
-  // Clean up visualizer on component unmount
-  useEffect(() => {
-    return () => {
-      cleanupAudioVisualizer();
-    };
-  }, []);
-
   // Keep transcriptRef in sync with transcript state
   useEffect(() => {
     transcriptRef.current = transcript;
@@ -80,13 +76,45 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
   // Initialize ElevenLabs Conversational AI
   const conversation = useConversation({
     onConnect: () => {
-      console.log("ElevenLabs Connected successfully!");
+      console.log("ElevenLabs Connected successfully!", sessionModeRef.current);
+
+      if (sessionModeRef.current === 'chat') {
+        setChatSessionState('connected');
+        const pendingMessage = pendingChatMessageRef.current;
+        if (pendingMessage) {
+          pendingChatMessageRef.current = null;
+          window.setTimeout(() => {
+            try {
+              voiceConversationRef.current?.sendUserMessage(pendingMessage);
+            } catch (err) {
+              console.error("Failed to send pending chat message:", err);
+              setChatLoading(false);
+              setChatMessages(prev => [
+                ...prev,
+                { role: 'zara', content: 'I connected to Zara chat, but could not send your message. Please try again.' }
+              ]);
+            }
+          }, 0);
+        }
+        return;
+      }
+
+      sessionModeRef.current = 'voice';
       callStartTime.current = Date.now();
       isCallLogSaved.current = false;
       setCallState({ status: 'active', message: 'Connected to Voice Agent Zara' });
     },
     onDisconnect: () => {
-      console.log("ElevenLabs Disconnected.");
+      console.log("ElevenLabs Disconnected.", sessionModeRef.current);
+
+      if (sessionModeRef.current === 'chat') {
+        setChatSessionState('idle');
+        setChatLoading(false);
+        sessionModeRef.current = null;
+        pendingChatMessageRef.current = null;
+        return;
+      }
+
       setCallState({ status: 'completed', message: 'Voice Call Completed' });
       if (onClearAction) onClearAction();
       cleanupAudioVisualizer();
@@ -117,12 +145,30 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
       } else {
         onRecordCreated();
       }
+
+      sessionModeRef.current = null;
     },
     onError: (error: any) => {
       console.error("ElevenLabs Session Error:", error);
+
+      if (sessionModeRef.current === 'chat') {
+        setChatSessionState('failed');
+        setChatLoading(false);
+        pendingChatMessageRef.current = null;
+        const message = typeof error === 'string' ? error : error?.message;
+        setChatMessages(prev => [
+          ...prev,
+          { role: 'zara', content: message || 'Sorry, I could not connect to Zara chat. Please try again.' }
+        ]);
+        sessionModeRef.current = null;
+        return;
+      }
+
       setCallState({ status: 'failed', message: error.message || 'Connection or microphone error' });
     },
     onMessage: (msg: any) => {
+      if (sessionModeRef.current === 'chat') return;
+
       console.log("Transcript message:", msg);
       if (msg.message && msg.source) {
         setTranscript(prev => {
@@ -135,19 +181,63 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
           return [...prev, { speaker, text: msg.message }];
         });
       }
+    },
+    onAgentTyping: () => {
+      if (sessionModeRef.current === 'chat') {
+        setChatLoading(true);
+      }
+    },
+    onAgentChatResponsePart: (part: any) => {
+      if (sessionModeRef.current !== 'chat') return;
+
+      if (part.type === 'start') {
+        setChatLoading(true);
+        if (part.text) {
+          setChatMessages(prev => [...prev, { role: 'zara', content: part.text }]);
+        }
+        return;
+      }
+
+      if (part.type === 'delta') {
+        setChatMessages(prev => {
+          const next = [...prev];
+          const last = next[next.length - 1];
+
+          if (last?.role === 'zara') {
+            next[next.length - 1] = {
+              ...last,
+              content: `${last.content}${part.text || ''}`
+            };
+            return next;
+          }
+
+          return [...next, { role: 'zara', content: part.text || '' }];
+        });
+        return;
+      }
+
+      if (part.type === 'stop') {
+        setChatLoading(false);
+        window.setTimeout(onRecordCreated, 1000);
+      }
     }
   });
 
-  // Clean up ElevenLabs session on component unmount
+  useEffect(() => {
+    voiceConversationRef.current = conversation;
+  }, [conversation]);
+
+  // Clean up ElevenLabs session and local audio resources only when this widget unmounts.
   useEffect(() => {
     return () => {
+      cleanupAudioVisualizer();
       try {
-        conversation.endSession();
+        voiceConversationRef.current?.endSession();
       } catch (err) {
         console.error("Error ending ElevenLabs session on unmount:", err);
       }
     };
-  }, [conversation]);
+  }, []);
 
   // Handle pre-selected trigger actions from outer buttons (e.g. "Place Order", "Book Table")
   useEffect(() => {
@@ -250,6 +340,7 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
       console.warn("Call start bypassed: session already connecting or active.");
       return;
     }
+    sessionModeRef.current = 'voice';
     setCallState({ status: 'connecting', message: 'Requesting microphone access...' });
     setTranscript([]);
     callStartTime.current = null;
@@ -309,6 +400,7 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
     } catch (error: any) {
       console.error("Failed to start ElevenLabs session:", error);
       cleanupAudioVisualizer();
+      sessionModeRef.current = null;
       setCallState({
         status: 'failed',
         message: error.message || 'ElevenLabs is not configured. Please add ELEVENLABS_AGENT_ID and ELEVENLABS_API_KEY in the backend environment.'
@@ -399,32 +491,54 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
     if (!query || chatLoading) return;
 
     setChatInput('');
-    const newMessages = [...chatMessages, { role: 'customer' as const, content: query }];
-    setChatMessages(newMessages);
+    setChatMessages(prev => [...prev, { role: 'customer' as const, content: query }]);
     setChatLoading(true);
+    pendingChatMessageRef.current = query;
 
     try {
-      const response = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: newMessages })
-      });
-      const data = await response.json();
-      
-      if (response.ok && data.text) {
-        setChatMessages(prev => [...prev, { role: 'zara', content: data.text }]);
-        if (data.n8nResult && data.n8nResult.success) {
-          // If a successful action was completed (e.g. placed order, booked table), notify parent
-          setTimeout(onRecordCreated, 1500);
-        }
-      } else {
-        setChatMessages(prev => [...prev, { role: 'zara', content: data.error || 'Sorry, I encountered an issue processing your request.' }]);
+      if (conversation.status === 'connected' && sessionModeRef.current === 'chat') {
+        pendingChatMessageRef.current = null;
+        conversation.sendUserMessage(query);
+        return;
       }
-    } catch (err) {
+
+      if (conversation.status === 'connecting' && sessionModeRef.current === 'chat') {
+        return;
+      }
+
+      sessionModeRef.current = 'chat';
+      setChatSessionState('connecting');
+
+      const response = await fetch('/api/elevenlabs/session');
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok || data.error || (!data.agentId && !data.signedUrl)) {
+        throw new Error(data.error || 'ElevenLabs Zara chat is not configured on the server.');
+      }
+
+      if (data.signedUrl) {
+        conversation.startSession({
+          signedUrl: data.signedUrl,
+          textOnly: true,
+          connectionType: 'websocket'
+        });
+      } else {
+        conversation.startSession({
+          agentId: data.agentId,
+          textOnly: true,
+          connectionType: 'websocket'
+        });
+      }
+    } catch (err: any) {
       console.error(err);
-      setChatMessages(prev => [...prev, { role: 'zara', content: 'Network error. Please try again.' }]);
-    } finally {
+      pendingChatMessageRef.current = null;
+      sessionModeRef.current = null;
+      setChatSessionState('failed');
       setChatLoading(false);
+      setChatMessages(prev => [
+        ...prev,
+        { role: 'zara', content: err.message || 'Sorry, I could not connect to Zara chat. Please try again.' }
+      ]);
     }
   };
 return (
@@ -468,7 +582,7 @@ return (
       <div className="flex gap-2 p-1 bg-zinc-950 rounded-xl mb-5 border border-zinc-800">
         <button
           onClick={() => {
-            if (callState.status === 'active') {
+            if (callState.status === 'active' || sessionModeRef.current === 'chat') {
               handleEndCall();
             }
             setActiveMode('voice');
@@ -482,7 +596,7 @@ return (
         </button>
         <button
           onClick={() => {
-            if (callState.status === 'active') {
+            if (callState.status === 'active' || callState.status === 'connecting') {
               handleEndCall();
             }
             setActiveMode('chat');
@@ -575,7 +689,7 @@ return (
 
                 {/* Real-time spectrum stats right aligned */}
                 <div className="absolute top-2.5 right-3.5 text-[9px] font-mono text-zinc-500 font-bold z-10 flex items-center gap-2">
-                  <span>FPS: 60</span>
+                  <span>FPS: 24</span>
                   <span>•</span>
                   <span>FFT: 64</span>
                   <span>•</span>
@@ -734,7 +848,7 @@ return (
                 <span className="text-[9px] font-bold uppercase tracking-wider mb-0.5 text-red-400">Zara (AI)</span>
                 <div className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-zinc-800 text-zinc-400 text-xs rounded-tl-none border border-zinc-700/50 animate-pulse">
                   <Loader2 className="w-3 h-3 animate-spin text-red-500" />
-                  <span>Zara is processing...</span>
+                  <span>{chatSessionState === 'connecting' ? 'Connecting to Zara...' : 'Zara is typing...'}</span>
                 </div>
               </div>
             )}
@@ -747,7 +861,7 @@ return (
               type="text"
               value={chatInput}
               onChange={e => setChatInput(e.target.value)}
-              placeholder="Type a message to Zara..."
+              placeholder={chatSessionState === 'failed' ? 'Try Zara chat again...' : 'Type a message to Zara...'}
               disabled={chatLoading}
               className="flex-1 bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:ring-1 focus:ring-red-500 placeholder-zinc-500"
             />
