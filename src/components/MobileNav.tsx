@@ -19,7 +19,7 @@ export default function MobileNav({ currentTab, onTabChange, role, unreadCount =
   const ownerTabs = [
     { id: 'overview', name: 'Overview', icon: LayoutGrid },
     { id: 'orders', name: 'Orders', icon: ShoppingBag },
-    { id: 'reservations', name: 'Bookings', icon: Calendar },
+    { id: 'reservations', name: 'Reservations', icon: Calendar },
     { id: 'menu', name: 'Menu', icon: ListCollapse },
     { id: 'escalations', name: 'Alerts', icon: AlertTriangle },
     { id: 'revenue', name: 'Revenue', icon: TrendingUp },

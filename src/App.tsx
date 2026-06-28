@@ -613,8 +613,16 @@ export default function App() {
     return true;
   });
 
-  const completedRevOrdersRevenue = filteredRevOrders.reduce((sum, o) => sum + Number(o.total_amount || 0), 0);
-  const completedRevReservationsGuests = filteredRevReservations.reduce((sum, r) => sum + Number(r.party_size || 0), 0);
+  const completedRevOrdersRevenue = revTypeFilter === 'RESERVATIONS'
+    ? 0
+    : filteredRevOrders.reduce((sum, o) => sum + Number(o.total_amount || 0), 0);
+
+  const completedRevReservationsRevenue = revTypeFilter === 'ORDERS'
+    ? 0
+    : filteredRevReservations.reduce((sum, r) => sum + 1000, 0); // Flat PKR 1,000 per completed booking
+
+  const displayOrdersCount = revTypeFilter === 'RESERVATIONS' ? 0 : filteredRevOrders.length;
+  const displayReservationsCount = revTypeFilter === 'ORDERS' ? 0 : filteredRevReservations.length;
 
   const combinedRevItems = [
     ...filteredRevOrders.map(o => ({
@@ -636,7 +644,7 @@ export default function App() {
       date: r.reservation_date,
       time: r.reservation_time,
       details: `Table for ${r.party_size} guests`,
-      amount: 0,
+      amount: 1000,
       raw_date: `${r.reservation_date}T${r.reservation_time.includes(':') ? (r.reservation_time.split(' ')[0]?.includes(':') ? r.reservation_time.split(' ')[0] : '00:00') : '00:00'}`
     }))
   ].filter(item => {
@@ -1209,32 +1217,7 @@ export default function App() {
           {/* Owner Dashboard Content wrapper */}
           <main className="flex-1 p-4 md:p-6 space-y-6 pb-24 md:pb-10">
             
-            {/* Dynamic Owner Tabs navigation for mobile */}
-            <div className="flex md:hidden border-b border-zinc-200 overflow-x-auto scrollbar-none sticky top-[65px] bg-zinc-50/95 backdrop-blur-sm z-25 py-1 -mx-4 px-4 mb-4">
-              {[
-                { id: 'overview', name: 'Overview', icon: LayoutGrid },
-                { id: 'orders', name: 'Orders', icon: ShoppingBag },
-                { id: 'reservations', name: 'Bookings', icon: Calendar },
-                { id: 'menu', name: 'Menu', icon: ListCollapse },
-                { id: 'call_logs', name: 'Call Logs', icon: PhoneCall },
-                { id: 'escalations', name: 'Alerts', icon: AlertTriangle },
-              ].map(tab => {
-                const Icon = tab.icon;
-                const isActive = activeTab === tab.id;
-                return (
-                  <button
-                    key={tab.id}
-                    onClick={() => setActiveTab(tab.id)}
-                    className={`px-3 py-2.5 text-xs font-bold border-b-2 transition-all cursor-pointer flex items-center gap-1.5 whitespace-nowrap ${
-                      isActive ? 'border-red-600 text-red-600' : 'border-transparent text-zinc-500 hover:text-zinc-800'
-                    }`}
-                  >
-                    <Icon className="w-3.5 h-3.5" />
-                    {tab.name}
-                  </button>
-                );
-              })}
-            </div>
+
             
             {/* Tab view routing: Overview */}
             {activeTab === 'overview' && (
@@ -2131,8 +2114,8 @@ export default function App() {
                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
                   <div className="bg-white border border-zinc-200 rounded-2xl p-5 shadow-sm flex flex-col justify-between">
                     <div>
-                      <span className="text-[10px] uppercase font-bold text-zinc-400 tracking-wider">Completed Orders Revenue</span>
-                      <h4 className="text-xl font-black text-red-600 mt-1.5">
+                      <span className="text-[10px] uppercase font-bold text-zinc-400 tracking-wider">Order Revenue</span>
+                      <h4 className="text-xl font-black text-red-650 mt-1.5">
                         PKR {completedRevOrdersRevenue.toLocaleString()}
                       </h4>
                     </div>
@@ -2141,9 +2124,19 @@ export default function App() {
 
                   <div className="bg-white border border-zinc-200 rounded-2xl p-5 shadow-sm flex flex-col justify-between">
                     <div>
+                      <span className="text-[10px] uppercase font-bold text-zinc-400 tracking-wider">Reservation Revenue</span>
+                      <h4 className="text-xl font-black text-teal-650 mt-1.5">
+                        PKR {completedRevReservationsRevenue.toLocaleString()}
+                      </h4>
+                    </div>
+                    <p className="text-[10px] text-zinc-400 mt-3 font-semibold uppercase">Sum of completed bookings</p>
+                  </div>
+
+                  <div className="bg-white border border-zinc-200 rounded-2xl p-5 shadow-sm flex flex-col justify-between">
+                    <div>
                       <span className="text-[10px] uppercase font-bold text-zinc-400 tracking-wider">Completed Orders</span>
                       <h4 className="text-xl font-black text-zinc-800 mt-1.5">
-                        {filteredRevOrders.length} orders
+                        {displayOrdersCount} orders
                       </h4>
                     </div>
                     <p className="text-[10px] text-zinc-400 mt-3 font-semibold uppercase">Total items delivered</p>
@@ -2151,22 +2144,12 @@ export default function App() {
 
                   <div className="bg-white border border-zinc-200 rounded-2xl p-5 shadow-sm flex flex-col justify-between">
                     <div>
-                      <span className="text-[10px] uppercase font-bold text-zinc-400 tracking-wider">Completed Bookings</span>
+                      <span className="text-[10px] uppercase font-bold text-zinc-400 tracking-wider">Completed Reservations</span>
                       <h4 className="text-xl font-black text-zinc-800 mt-1.5">
-                        {filteredRevReservations.length} tables
+                        {displayReservationsCount} reservations
                       </h4>
                     </div>
-                    <p className="text-[10px] text-zinc-400 mt-3 font-semibold uppercase">Total reservations seated</p>
-                  </div>
-
-                  <div className="bg-white border border-zinc-200 rounded-2xl p-5 shadow-sm flex flex-col justify-between">
-                    <div>
-                      <span className="text-[10px] uppercase font-bold text-zinc-400 tracking-wider">Completed Guest Covers</span>
-                      <h4 className="text-xl font-black text-teal-650 mt-1.5">
-                        {completedRevReservationsGuests} guests
-                      </h4>
-                    </div>
-                    <p className="text-[10px] text-zinc-400 mt-3 font-semibold uppercase">Total seated party size</p>
+                    <p className="text-[10px] text-zinc-400 mt-3 font-semibold uppercase">Total tables seated</p>
                   </div>
                 </div>
 
