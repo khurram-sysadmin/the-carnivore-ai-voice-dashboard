@@ -855,7 +855,7 @@ export default function App() {
                             price: 'PKR 3,499',
                             desc: 'Marinated half-chicken slow-baked until crisp and juicy.',
                             tag: 'HOUSE FAVORITE',
-                            image: 'https://upload.wikimedia.org/wikipedia/commons/e/e6/Tandoori_Chicken_2.jpg'
+                            image: 'https://images.unsplash.com/photo-1565557623262-b51c2513a641?w=600&auto=format&fit=crop&q=80'
                           }
                         ].map((dish, i) => (
                           <div key={i} className="group bg-white border border-zinc-200 rounded-2xl overflow-hidden shadow-sm hover:shadow hover:border-red-500/20 transition-all flex flex-col justify-between">
