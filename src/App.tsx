@@ -735,10 +735,44 @@ export default function App() {
           </header>
 
           {/* Customer Container Grid */}
-          <main className="z-10 flex-1 max-w-7xl w-full mx-auto px-4 md:px-6 py-6 grid grid-cols-1 lg:grid-cols-12 gap-6">
+          <main className="z-10 flex-1 max-w-7xl w-full mx-auto px-4 md:px-6 py-6 space-y-6">
             
-            {/* Left/Middle Column (8-col width on desktop) */}
-            <div className="lg:col-span-8 space-y-6">
+            {/* Full-Width Welcome Hero Banner */}
+            <div className="bg-gradient-to-r from-zinc-950 via-red-950 to-zinc-950 text-white rounded-3xl p-6 md:p-10 shadow-xl relative overflow-hidden border border-zinc-900">
+              <div className="absolute right-0 bottom-0 opacity-10 translate-y-8 translate-x-8 pointer-events-none">
+                <CarnivoreLogo className="w-80 h-80" />
+              </div>
+              <div className="relative z-10 max-w-2xl space-y-3">
+                <span className="bg-red-500/20 text-red-400 border border-red-500/30 text-[9px] font-black uppercase tracking-wider px-3 py-1 rounded-full w-max block">
+                  ESTABLISHED 2026 • PREMIUM SELECTION
+                </span>
+                <h2 className="text-xl md:text-3xl font-black tracking-tight uppercase leading-tight">
+                  Taste the Flame.<br />Experience The Carnivore.
+                </h2>
+                <p className="text-xs text-zinc-300 leading-relaxed font-medium">
+                  Slow-baked lamb backbone, melt-in-your-mouth beef brisket, lean camel meat, and crispy half-chicken. 
+                  Connect with <strong>Zara</strong>, our real-time AI Voice Concierge, to order food, book window tables, 
+                  or manage active records instantly.
+                </p>
+                <div className="flex flex-wrap gap-2.5 pt-2">
+                  <span className="bg-white/10 text-white text-[10px] font-bold px-2.5 py-1 rounded-lg flex items-center gap-1.5">
+                    ⚡ WebRTC Ultra-Low Latency
+                  </span>
+                  <span className="bg-white/10 text-white text-[10px] font-bold px-2.5 py-1 rounded-lg flex items-center gap-1.5">
+                    🥩 Real-time Menu Priced by Weight
+                  </span>
+                  <span className="bg-white/10 text-white text-[10px] font-bold px-2.5 py-1 rounded-lg flex items-center gap-1.5">
+                    🟢 n8n Instant Dispatch Active
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Split layout columns */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+              
+              {/* Left/Middle Column (8-col width on desktop) */}
+              <div className="lg:col-span-8 space-y-6">
 
               {/* Dynamic Customer Tabs navigation (Always visible and scrollable) */}
               <div className="flex border-b border-zinc-200 overflow-x-auto scrollbar-none sticky top-[65px] bg-zinc-50/95 backdrop-blur-sm z-25 py-1 -mx-4 px-4 sm:mx-0 sm:px-0">
@@ -799,6 +833,67 @@ export default function App() {
                       onClearAction={() => setSelectedVoiceAction('')}
                     />
 
+                    {/* Today's Gourmet Specials Grid */}
+                    <div className="space-y-4 pt-6 border-t border-zinc-200/50 mt-8">
+                      <div>
+                        <h3 className="font-extrabold text-sm text-zinc-950 uppercase tracking-wider flex items-center gap-2">
+                          <Sparkles className="w-4 h-4 text-red-500" />
+                          Today's Gourmet Specials
+                        </h3>
+                        <p className="text-[10px] text-zinc-400 mt-1">
+                          Our premium slow-baked meat recommendations. Speak with Zara to order or inquire about weights.
+                        </p>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        {[
+                          {
+                            name: 'Lamb Shank',
+                            price: 'PKR 11.90/g',
+                            desc: 'Smoky, fall-off-the-bone lamb shank cooked to golden crust perfection.',
+                            tag: 'CHEF\'S SPECIAL',
+                            image: 'https://thecarnivore.com.pk/wp-content/uploads/2023/07/Lamb_shank.webp'
+                          },
+                          {
+                            name: 'Beef Brisket',
+                            price: 'PKR 9.30/g',
+                            desc: 'Lean beef slow-baked with herbs, served with traditional mint yogurt.',
+                            tag: 'TRENDING',
+                            image: 'https://thecarnivore.com.pk/wp-content/uploads/2026/04/beef-brisket-our-menu.webp'
+                          },
+                          {
+                            name: 'Baked Chicken Half',
+                            price: 'PKR 3,499',
+                            desc: 'Marinated half-chicken slow-baked until crisp and juicy.',
+                            tag: 'HOUSE FAVORITE',
+                            image: 'https://thecarnivore.com.pk/wp-content/uploads/2026/04/baked-chicken-our-menu.webp'
+                          }
+                        ].map((dish, i) => (
+                          <div key={i} className="group bg-white border border-zinc-200 rounded-2xl overflow-hidden shadow-sm hover:shadow hover:border-red-500/20 transition-all flex flex-col justify-between">
+                            <div className="relative h-32 overflow-hidden bg-zinc-100">
+                              <img src={dish.image} alt={dish.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
+                              <span className="absolute top-2 left-2 bg-zinc-950/80 backdrop-blur-sm text-white text-[8px] font-black uppercase tracking-wider px-2 py-0.5 rounded">
+                                {dish.tag}
+                              </span>
+                            </div>
+                            <div className="p-3.5 space-y-2 flex-1 flex flex-col justify-between">
+                              <div className="space-y-1">
+                                <div className="flex items-center justify-between gap-2">
+                                  <h4 className="font-bold text-xs text-zinc-900 group-hover:text-red-650 transition-colors">{dish.name}</h4>
+                                  <span className="font-mono font-extrabold text-[10px] text-red-600 bg-red-50/50 border border-red-100/50 px-2 py-0.5 rounded">
+                                    {dish.price}
+                                  </span>
+                                </div>
+                                <p className="text-[10px] text-zinc-450 leading-relaxed line-clamp-2">{dish.desc}</p>
+                              </div>
+                              <div className="pt-2 border-t border-zinc-100 text-[9px] font-semibold text-zinc-400 italic">
+                                Suggestions: "I want to order {dish.name}"
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
 
                   </motion.div>
                 )}
@@ -1060,9 +1155,66 @@ export default function App() {
                 )}
               </div>
 
+              {/* Live Kitchen Status Card */}
+              <div className="bg-white border border-zinc-200 rounded-2xl p-5 shadow-sm space-y-4">
+                <div className="flex items-center gap-2 pb-2.5 border-b border-zinc-100">
+                  <span className="relative flex h-2 w-2">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                  </span>
+                  <h3 className="font-extrabold text-xs text-zinc-950 uppercase tracking-wider flex items-center gap-1">
+                    <Clock className="w-3.5 h-3.5 text-emerald-500" />
+                    Kitchen & Live Status
+                  </h3>
+                </div>
+
+                <div className="space-y-3.5 text-xs text-zinc-600">
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-lg bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-600 flex-shrink-0">
+                      <Clock className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <span className="font-bold text-zinc-900 block leading-tight">Kitchen Operating Normal</span>
+                      <span className="text-[10px] text-zinc-450 block mt-0.5">Average prep & delivery wait: 20-30 mins</span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-lg bg-red-50 border border-red-100 flex items-center justify-center text-red-650 flex-shrink-0">
+                      <ShoppingBag className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <span className="font-bold text-zinc-900 block leading-tight">Gourmet Meats In Stock</span>
+                      <span className="text-[10px] text-zinc-450 block mt-0.5">Lamb Shank, Beef Brisket, Camel Meat cuts</span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-lg bg-teal-50 border border-teal-100 flex items-center justify-center text-teal-650 flex-shrink-0">
+                      <Calendar className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <span className="font-bold text-zinc-900 block leading-tight">Table Seating Available</span>
+                      <span className="text-[10px] text-zinc-455 block mt-0.5">Book window slots tonight through Zara</span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-lg bg-zinc-950 border border-zinc-800 flex items-center justify-center text-red-500 flex-shrink-0">
+                      <Sparkles className="w-4 h-4 animate-pulse" />
+                    </div>
+                    <div>
+                      <span className="font-bold text-zinc-900 block leading-tight">AI Voice Concierge Online</span>
+                      <span className="text-[10px] text-zinc-450 block mt-0.5">Zara is active to take orders or reservations</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
             </div>
 
-          </main>
+          </div>
+        </main>
 
           {/* Bottom Native style bar for mobile customer navigation */}
           <MobileNav currentTab={activeTab} onTabChange={setActiveTab} role="customer" />
