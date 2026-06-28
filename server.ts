@@ -899,6 +899,50 @@ const sanitizeOrder = (order: any) => {
   return order;
 };
 
+const normalizeReservation = (reservation: any) => {
+  if (!reservation) return reservation;
+  const reservationDate =
+    reservation.reservation_date ??
+    reservation.date ??
+    reservation.booking_date ??
+    reservation.reservationDate ??
+    "";
+  const reservationTime =
+    reservation.reservation_time ??
+    reservation.time ??
+    reservation.booking_time ??
+    reservation.reservationTime ??
+    "";
+  const partySize =
+    reservation.party_size ??
+    reservation.guests ??
+    reservation.guest_count ??
+    reservation.number_of_guests ??
+    0;
+
+  return {
+    ...reservation,
+    reservation_number:
+      reservation.reservation_number ??
+      reservation.booking_number ??
+      reservation.booking_id ??
+      reservation.reservation_id ??
+      "",
+    reservation_date: reservationDate,
+    reservation_time: reservationTime,
+    party_size: Number(partySize) || 0,
+    special_requests: reservation.special_requests ?? reservation.requests ?? "",
+    status: reservation.status ?? "CONFIRMED",
+    updated_at: reservation.updated_at ?? reservation.created_at ?? new Date().toISOString()
+  };
+};
+
+const reservationSortValue = (reservation: any) => {
+  const normalized = normalizeReservation(reservation);
+  const value = new Date(`${normalized.reservation_date || "1970-01-01"}T${normalized.reservation_time || "00:00"}`).getTime();
+  return Number.isFinite(value) ? value : 0;
+};
+
 // 2.9 Customer-facing lookups (Public but strictly filtered)
 app.get("/api/customer/orders", async (req, res) => {
   const { phone, email, order_number } = req.query;
@@ -947,7 +991,7 @@ app.get("/api/customer/reservations", async (req, res) => {
       query = query.eq("customer_phone", phone);
     }
     const { data, error } = await query.order("created_at", { ascending: false });
-    if (!error && data) return res.json(data);
+    if (!error && data) return res.json(data.map(normalizeReservation));
     handleSupabaseError("reservations", error, "customer-fetch");
   }
 
@@ -959,7 +1003,7 @@ app.get("/api/customer/reservations", async (req, res) => {
   } else if (phone) {
     results = results.filter(r => r.customer_phone === phone);
   }
-  res.json(results);
+  res.json(results.map(normalizeReservation));
 });
 
 // 3. Orders Routing
@@ -1136,15 +1180,15 @@ app.get("/api/reservations", requireOwnerAuth, async (req, res) => {
     if (phone) query = query.eq("customer_phone", phone);
     if (reservation_number) query = query.eq("reservation_number", reservation_number);
     const { data, error } = await query;
-    if (!error && data) return res.json(data);
+    if (!error && data) return res.json(data.map(normalizeReservation));
     handleSupabaseError("reservations", error, "fetch");
   }
 
-  let filtered = [...localReservations];
+  let filtered = [...localReservations].map(normalizeReservation);
   if (email) filtered = filtered.filter(r => r.customer_email.toLowerCase() === (email as string).toLowerCase());
   if (phone) filtered = filtered.filter(r => r.customer_phone === phone);
   if (reservation_number) filtered = filtered.filter(r => r.reservation_number.toUpperCase() === (reservation_number as string).toUpperCase());
-  res.json(filtered.sort((a, b) => new Date(`${b.reservation_date}T${b.reservation_time}`).getTime() - new Date(`${a.reservation_date}T${a.reservation_time}`).getTime()));
+  res.json(filtered.sort((a, b) => reservationSortValue(b) - reservationSortValue(a)));
 });
 
 app.post("/api/reservations", requireOwnerAuth, async (req, res) => {
@@ -1181,7 +1225,7 @@ app.post("/api/reservations", requireOwnerAuth, async (req, res) => {
         }]);
         if (evError) handleSupabaseError("reservation_events", evError, "insert");
       }
-      return res.status(201).json(data[0]);
+      return res.status(201).json(normalizeReservation(data[0]));
     }
     handleSupabaseError("reservations", error, "insert");
   }
@@ -1212,7 +1256,7 @@ app.post("/api/reservations", requireOwnerAuth, async (req, res) => {
     }
   }
 
-  res.status(201).json(newRes);
+  res.status(201).json(normalizeReservation(newRes));
 });
 
 app.put("/api/reservations/:id", requireOwnerAuth, async (req, res) => {
@@ -1239,7 +1283,7 @@ app.put("/api/reservations/:id", requireOwnerAuth, async (req, res) => {
         }]);
         if (evError) handleSupabaseError("reservation_events", evError, "insert");
       }
-      return res.json(data[0]);
+      return res.json(normalizeReservation(data[0]));
     }
     handleSupabaseError("reservations", error, "update");
   }
@@ -1279,7 +1323,7 @@ app.put("/api/reservations/:id", requireOwnerAuth, async (req, res) => {
       }
     }
 
-    return res.json(localReservations[idx]);
+    return res.json(normalizeReservation(localReservations[idx]));
   }
   res.status(404).json({ error: "Reservation not found" });
 });

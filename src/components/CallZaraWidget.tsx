@@ -93,12 +93,10 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
   const [chatLoading, setChatLoading] = useState(false);
   const [chatSessionState, setChatSessionState] = useState<'idle' | 'connecting' | 'connected' | 'failed'>('idle');
   const [typedDetails, setTypedDetails] = useState({
-    name: '',
     phone: '',
-    email: '',
-    address: '',
-    notes: ''
+    email: ''
   });
+  const [detailsFormVisible, setDetailsFormVisible] = useState(false);
   const [detailsSent, setDetailsSent] = useState(false);
   const chatBottomRef = useRef<HTMLDivElement | null>(null);
   
@@ -153,6 +151,8 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
       sessionModeRef.current = 'voice';
       callStartTime.current = Date.now();
       isCallLogSaved.current = false;
+      setDetailsFormVisible(false);
+      setDetailsSent(false);
       setCallState({ status: 'active', message: 'Connected to Voice Agent Zara' });
     },
     onDisconnect: () => {
@@ -167,6 +167,7 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
       }
 
       setCallState({ status: 'completed', message: 'Voice Call Completed' });
+      setDetailsFormVisible(false);
       if (onClearAction) onClearAction();
       cleanupAudioVisualizer();
       
@@ -227,6 +228,41 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
           const last = prev[prev.length - 1];
           const speaker = msg.source === 'user' ? 'You' : 'Zara';
           const text = romanizeTranscriptText(msg.message);
+          const lowerText = text.toLowerCase();
+          const explicitContactFormRequest =
+            lowerText.includes('fill the details below') ||
+            lowerText.includes('details below') ||
+            lowerText.includes('type your email') ||
+            lowerText.includes('type the email') ||
+            lowerText.includes('type your phone') ||
+            lowerText.includes('type the phone') ||
+            lowerText.includes('fill the phone') ||
+            lowerText.includes('fill the email');
+          const contactQuestion =
+            (
+              lowerText.includes('phone number') ||
+              lowerText.includes('mobile number') ||
+              lowerText.includes('contact number') ||
+              lowerText.includes('email address')
+            ) &&
+            (
+              lowerText.includes('please') ||
+              lowerText.includes('could you') ||
+              lowerText.includes('can you') ||
+              lowerText.includes('provide') ||
+              lowerText.includes('share') ||
+              lowerText.includes('need') ||
+              lowerText.includes('what is') ||
+              lowerText.endsWith('?')
+            );
+          const asksForContact =
+            speaker === 'Zara' &&
+            (explicitContactFormRequest || contactQuestion);
+
+          if (asksForContact && (!detailsSent || explicitContactFormRequest)) {
+            setDetailsFormVisible(true);
+          }
+
           if (last && last.speaker === speaker && last.text === text) {
             return prev;
           }
@@ -489,23 +525,21 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
     if (conversation.status !== 'connected' || sessionModeRef.current !== 'voice') return;
 
     const entries = [
-      ['Name', typedDetails.name.trim()],
       ['Phone', typedDetails.phone.trim()],
-      ['Email', typedDetails.email.trim()],
-      ['Delivery address', typedDetails.address.trim()],
-      ['Notes', typedDetails.notes.trim()]
+      ['Email', typedDetails.email.trim()]
     ].filter(([, value]) => value);
 
     if (entries.length === 0) return;
 
     const detailText = entries.map(([label, value]) => `${label}: ${value}`).join('\n');
-    const message = `The customer typed these exact details in the dashboard. Use typed details as authoritative and do not ask the customer to spell them by voice. Confirm only if needed.\n${detailText}`;
+    const message = `The customer filled the phone/email form below in the dashboard. Use these typed values exactly. Do not ask the customer to spell them by voice. Read them back and confirm only if needed.\n${detailText}`;
 
     try {
       conversation.sendUserMessage(message);
       const transcriptEntry = romanizeTranscriptText(`Typed details sent:\n${detailText}`);
       setTranscript(prev => [...prev, { speaker: 'You', text: transcriptEntry }]);
       setDetailsSent(true);
+      setDetailsFormVisible(false);
     } catch (err) {
       console.error("Failed to send typed details to Zara:", err);
       setDetailsSent(false);
@@ -791,75 +825,60 @@ return (
                 )}
               </div>
 
-              {/* Typed details handoff for exact email/address values */}
-              <form onSubmit={handleTypedDetailsSubmit} className="bg-zinc-950/80 border border-zinc-800 rounded-xl p-3">
-                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1.5 mb-2">
-                  <div>
-                    <p className="text-xs font-bold text-zinc-200">Type exact details</p>
-                    <p className="text-[10px] text-zinc-500">Best for email, phone, and delivery address.</p>
+              {/* Typed phone/email handoff appears only when Zara asks for contact details. */}
+              {detailsFormVisible && (
+                <form onSubmit={handleTypedDetailsSubmit} className="bg-zinc-950/80 border border-red-900/60 rounded-xl p-3 shadow-lg shadow-red-950/20">
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1.5 mb-2">
+                    <div>
+                      <p className="text-xs font-bold text-zinc-200">Fill details below</p>
+                      <p className="text-[10px] text-zinc-500">Use this for exact phone number and email address.</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setDetailsFormVisible(false)}
+                      className="text-[10px] font-bold text-zinc-500 hover:text-zinc-300"
+                    >
+                      Hide
+                    </button>
                   </div>
-                  {detailsSent && <span className="text-[10px] font-bold text-emerald-400">Sent to Zara</span>}
-                </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  <input
-                    value={typedDetails.name}
-                    onChange={e => {
-                      setDetailsSent(false);
-                      setTypedDetails(prev => ({ ...prev, name: e.target.value }));
-                    }}
-                    placeholder="Name"
-                    className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:ring-1 focus:ring-red-500"
-                  />
-                  <input
-                    value={typedDetails.phone}
-                    onChange={e => {
-                      setDetailsSent(false);
-                      setTypedDetails(prev => ({ ...prev, phone: e.target.value }));
-                    }}
-                    placeholder="Phone"
-                    className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:ring-1 focus:ring-red-500"
-                  />
-                  <input
-                    value={typedDetails.email}
-                    onChange={e => {
-                      setDetailsSent(false);
-                      setTypedDetails(prev => ({ ...prev, email: e.target.value }));
-                    }}
-                    placeholder="Email"
-                    type="email"
-                    className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:ring-1 focus:ring-red-500"
-                  />
-                  <input
-                    value={typedDetails.address}
-                    onChange={e => {
-                      setDetailsSent(false);
-                      setTypedDetails(prev => ({ ...prev, address: e.target.value }));
-                    }}
-                    placeholder="Delivery address"
-                    className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:ring-1 focus:ring-red-500"
-                  />
-                </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <input
+                      value={typedDetails.phone}
+                      onChange={e => {
+                        setDetailsSent(false);
+                        setTypedDetails(prev => ({ ...prev, phone: e.target.value }));
+                      }}
+                      placeholder="Phone number"
+                      inputMode="tel"
+                      className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:ring-1 focus:ring-red-500"
+                    />
+                    <input
+                      value={typedDetails.email}
+                      onChange={e => {
+                        setDetailsSent(false);
+                        setTypedDetails(prev => ({ ...prev, email: e.target.value }));
+                      }}
+                      placeholder="Email address"
+                      type="email"
+                      inputMode="email"
+                      className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:ring-1 focus:ring-red-500"
+                    />
+                  </div>
 
-                <div className="flex gap-2 mt-2">
-                  <input
-                    value={typedDetails.notes}
-                    onChange={e => {
-                      setDetailsSent(false);
-                      setTypedDetails(prev => ({ ...prev, notes: e.target.value }));
-                    }}
-                    placeholder="Optional note"
-                    className="flex-1 bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:ring-1 focus:ring-red-500"
-                  />
                   <button
                     type="submit"
-                    className="bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-white px-3 py-2 rounded-lg text-xs font-bold flex items-center gap-1.5"
+                    className="mt-2 w-full bg-red-600 hover:bg-red-700 text-white px-3 py-2 rounded-lg text-xs font-bold flex items-center justify-center gap-1.5"
                   >
                     <Send className="w-3.5 h-3.5" />
-                    Send
+                    Send to Zara
                   </button>
-                </div>
-              </form>
+                </form>
+              )}
+
+              {!detailsFormVisible && detailsSent && (
+                <p className="text-[10px] font-bold text-emerald-400 text-center">Phone/email sent to Zara.</p>
+              )}
 
               {/* Muted alert */}
               {isMuted && (
