@@ -78,6 +78,108 @@ const romanizeTranscriptText = (text: string) => {
   return output.replace(/\s+/g, ' ').trim();
 };
 
+const cleanDevanagariVowels: Record<string, string> = {
+  '\u0905': 'a', '\u0906': 'aa', '\u0907': 'i', '\u0908': 'ee', '\u0909': 'u',
+  '\u090A': 'oo', '\u090B': 'ri', '\u090F': 'e', '\u0910': 'ai',
+  '\u0913': 'o', '\u0914': 'au'
+};
+
+const cleanDevanagariMatras: Record<string, string> = {
+  '\u093E': 'aa', '\u093F': 'i', '\u0940': 'ee', '\u0941': 'u', '\u0942': 'oo',
+  '\u0943': 'ri', '\u0947': 'e', '\u0948': 'ai', '\u094B': 'o', '\u094C': 'au'
+};
+
+const cleanDevanagariConsonants: Record<string, string> = {
+  '\u0915': 'k', '\u0916': 'kh', '\u0917': 'g', '\u0918': 'gh', '\u0919': 'ng',
+  '\u091A': 'ch', '\u091B': 'chh', '\u091C': 'j', '\u091D': 'jh', '\u091E': 'ny',
+  '\u091F': 't', '\u0920': 'th', '\u0921': 'd', '\u0922': 'dh', '\u0923': 'n',
+  '\u0924': 't', '\u0925': 'th', '\u0926': 'd', '\u0927': 'dh', '\u0928': 'n',
+  '\u092A': 'p', '\u092B': 'ph', '\u092C': 'b', '\u092D': 'bh', '\u092E': 'm',
+  '\u092F': 'y', '\u0930': 'r', '\u0932': 'l', '\u0935': 'v', '\u0936': 'sh',
+  '\u0937': 'sh', '\u0938': 's', '\u0939': 'h', '\u095C': 'r', '\u095D': 'rh',
+  '\u0958': 'q', '\u0959': 'kh', '\u095A': 'gh', '\u095B': 'z', '\u095E': 'f'
+};
+
+const hinglishWordMap: Record<string, string> = {
+  '\u092E\u0947\u0930\u093E': 'mera',
+  '\u092E\u0947\u0930\u0940': 'meri',
+  '\u092E\u0947\u0930\u0947': 'mere',
+  '\u0928\u093E\u092E': 'naam',
+  '\u0939\u0948': 'hai',
+  '\u0939\u0948\u0902': 'hain',
+  '\u0915\u094D\u092F\u093E': 'kya',
+  '\u092E\u0941\u091D\u0947': 'mujhe',
+  '\u0906\u092A': 'aap',
+  '\u0906\u092A\u0915\u093E': 'aapka',
+  '\u092B\u094B\u0928': 'phone',
+  '\u0928\u0902\u092C\u0930': 'number',
+  '\u0908\u092E\u0947\u0932': 'email',
+  '\u0928\u0940\u091A\u0947': 'neeche',
+  '\u092D\u0930\u0947\u0902': 'bharen',
+  '\u092D\u0930\u094B': 'bharo',
+  '\u092D\u0930': 'bhar',
+  '\u0932\u093F\u0916\u0947\u0902': 'likhen',
+  '\u0932\u093F\u0916\u094B': 'likho',
+  '\u092E\u094B\u0939\u092E\u094D\u092E\u0926': 'muhammad',
+  '\u092E\u0941\u0939\u092E\u094D\u092E\u0926': 'muhammad',
+  '\u0916\u0941\u0930\u094D\u0930\u092E': 'khurram',
+  '\u092B\u0930\u0939\u093E\u0928': 'farhan'
+};
+
+const transliterateDevanagariWord = (word: string) => {
+  if (hinglishWordMap[word]) return hinglishWordMap[word];
+
+  let output = '';
+  for (let i = 0; i < word.length; i++) {
+    const char = word[i];
+    const next = word[i + 1];
+
+    if (cleanDevanagariVowels[char]) {
+      output += cleanDevanagariVowels[char];
+      continue;
+    }
+
+    if (cleanDevanagariConsonants[char]) {
+      output += cleanDevanagariConsonants[char];
+      if (next === '\u094D') {
+        i++;
+      } else if (cleanDevanagariMatras[next]) {
+        output += cleanDevanagariMatras[next];
+        i++;
+      } else {
+        output += 'a';
+      }
+      continue;
+    }
+
+    if (char === '\u0902' || char === '\u0901') {
+      output += 'n';
+      continue;
+    }
+
+    if (char === '\u0903') {
+      output += 'h';
+      continue;
+    }
+
+    if (char === '\u093C') continue;
+    output += cleanDevanagariMatras[char] ?? char;
+  }
+
+  return output
+    .replace(/aa\b/g, 'a')
+    .replace(/([a-z]{4,})a\b/g, '$1');
+};
+
+const formatTranscriptText = (text: string) => {
+  if (!/[\u0900-\u097F]/.test(text)) return text;
+
+  return text
+    .replace(/[\u0900-\u097F]+/g, token => transliterateDevanagariWord(token))
+    .replace(/\s+/g, ' ')
+    .trim();
+};
+
 export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onClearAction }: CallZaraWidgetProps) {
   const [callState, setCallState] = useState<CallState>({ status: 'idle', message: 'Click to call Zara' });
   const [transcript, setTranscript] = useState<{ speaker: 'Zara' | 'You'; text: string }[]>([]);
@@ -227,23 +329,39 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
           // Prevent duplicate consecutive entries with identical text
           const last = prev[prev.length - 1];
           const speaker = msg.source === 'user' ? 'You' : 'Zara';
-          const text = romanizeTranscriptText(msg.message);
+          const text = formatTranscriptText(msg.message);
           const lowerText = text.toLowerCase();
           const explicitContactFormRequest =
             lowerText.includes('fill the details below') ||
             lowerText.includes('details below') ||
+            lowerText.includes('fill the phone number') ||
+            lowerText.includes('fill your phone number') ||
+            lowerText.includes('fill phone number') ||
             lowerText.includes('type your email') ||
             lowerText.includes('type the email') ||
             lowerText.includes('type your phone') ||
             lowerText.includes('type the phone') ||
             lowerText.includes('fill the phone') ||
-            lowerText.includes('fill the email');
+            lowerText.includes('fill the email') ||
+            lowerText.includes('phone number and email below') ||
+            lowerText.includes('phone and email below') ||
+            lowerText.includes('phone/email') ||
+            lowerText.includes('email below') ||
+            lowerText.includes('phone below') ||
+            (
+              (lowerText.includes('phone') || lowerText.includes('number')) &&
+              (lowerText.includes('email') || lowerText.includes('mail')) &&
+              (lowerText.includes('below') || lowerText.includes('neeche') || lowerText.includes('niche') || lowerText.includes('bhar') || lowerText.includes('likh') || lowerText.includes('send'))
+            );
           const contactQuestion =
             (
               lowerText.includes('phone number') ||
               lowerText.includes('mobile number') ||
               lowerText.includes('contact number') ||
-              lowerText.includes('email address')
+              lowerText.includes('email address') ||
+              lowerText.includes('phone aur email') ||
+              lowerText.includes('number aur email') ||
+              lowerText.includes('mail address')
             ) &&
             (
               lowerText.includes('please') ||
@@ -536,7 +654,7 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
 
     try {
       conversation.sendUserMessage(message);
-      const transcriptEntry = romanizeTranscriptText(`Typed details sent:\n${detailText}`);
+      const transcriptEntry = formatTranscriptText(`Typed details sent:\n${detailText}`);
       setTranscript(prev => [...prev, { speaker: 'You', text: transcriptEntry }]);
       setDetailsSent(true);
       setDetailsFormVisible(false);
