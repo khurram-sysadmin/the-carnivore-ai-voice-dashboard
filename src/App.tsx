@@ -1804,95 +1804,6 @@ export default function App() {
                           </p>
                         </div>
                       )}
-
-                      {/* Transcript Timeline Controls */}
-                      {(() => {
-                        const totalSec = selectedCallLog.duration_seconds || 60;
-                        const currSec = (callProgress / 100) * totalSec;
-                        const formatTime = (sec: number) => {
-                          const m = Math.floor(sec / 60);
-                          const s = Math.floor(sec % 60);
-                          return `${m}:${s < 10 ? '0' : ''}${s}`;
-                        };
-
-                        return (
-                          <div className="mb-4 bg-zinc-900 text-white rounded-2xl p-4 border border-zinc-800 shadow-lg space-y-3">
-                            <div className="flex items-center justify-between gap-4">
-                              
-                              {/* Left side: Play/Pause circle */}
-                              <button
-                                onClick={() => setIsCallPlaying(!isCallPlaying)}
-                                className={`w-9 h-9 rounded-full flex items-center justify-center cursor-pointer transition-all ${
-                                  isCallPlaying 
-                                    ? 'bg-red-600 hover:bg-red-500 animate-pulse shadow-[0_0_12px_rgba(220,38,38,0.5)]' 
-                                    : 'bg-white text-zinc-950 hover:bg-zinc-200'
-                                }`}
-                                title={isCallPlaying ? "Pause Playback" : "Play Conversation Audio"}
-                              >
-                                {isCallPlaying ? (
-                                  <Pause className="w-4 h-4 text-white fill-current" />
-                                ) : (
-                                  <Play className="w-4 h-4 text-zinc-950 fill-current ml-0.5" />
-                                )}
-                              </button>
-
-                              {/* Center: Scrubber slider and timeline timer */}
-                              <div className="flex-1 min-w-0">
-                                <div className="flex justify-between items-center text-[10px] text-zinc-400 font-mono mb-1">
-                                  <span className="flex items-center gap-1">
-                                    <Volume2 className="w-3 h-3 text-red-500 animate-pulse" />
-                                    TRANSCRIPT TIMELINE
-                                  </span>
-                                  <span>{formatTime(currSec)} / {formatTime(totalSec)}</span>
-                                </div>
-                                <input
-                                  type="range"
-                                  min="0"
-                                  max="100"
-                                  step="1"
-                                  value={callProgress}
-                                  onChange={(e) => setCallProgress(Number(e.target.value))}
-                                  className="w-full accent-red-600 h-1 bg-zinc-700 rounded-lg appearance-none cursor-pointer hover:bg-zinc-600 transition-colors"
-                                />
-                              </div>
-
-                              {/* Right side: Speed multiplier chip */}
-                              <button
-                                onClick={() => {
-                                  setPlaybackSpeed(prev => prev === 1 ? 1.5 : prev === 1.5 ? 2 : 1);
-                                }}
-                                className="px-2.5 py-1 bg-zinc-800 border border-zinc-700 text-zinc-300 rounded-lg text-[10px] font-bold hover:bg-zinc-700 active:scale-95 transition-all cursor-pointer flex-shrink-0"
-                                title="Adjust Playback Speed"
-                              >
-                                {playbackSpeed}x
-                              </button>
-                            </div>
-
-                            {/* Bouncing Audio Waves visualizer */}
-                            <div className="flex items-center gap-1 h-10 bg-black/40 border border-zinc-800 rounded-xl px-4 justify-center">
-                              {Array.from({ length: 24 }).map((_, i) => (
-                                <motion.div
-                                  key={i}
-                                  animate={isCallPlaying ? {
-                                    height: [8, Math.random() * 24 + 6, 8],
-                                  } : {
-                                    height: 6
-                                  }}
-                                  transition={isCallPlaying ? {
-                                    repeat: Infinity,
-                                    duration: 0.5 + (i % 6) * 0.1,
-                                    ease: "easeInOut"
-                                  } : {}}
-                                  className={`w-[3px] rounded-full transition-colors duration-300 ${
-                                    isCallPlaying ? 'bg-red-500 shadow-[0_0_6px_rgba(239,68,68,0.4)]' : 'bg-zinc-700'
-                                  }`}
-                                />
-                              ))}
-                            </div>
-                          </div>
-                        );
-                      })()}
-
                       {/* Chat Messages */}
                       <div className="flex-1 overflow-y-auto space-y-4 pr-1 font-sans text-xs scrollbar-thin">
                         {selectedCallLog.transcript ? (() => {
@@ -1902,11 +1813,8 @@ export default function App() {
                             const messageText = line.replace(/^(Zara:|You:)/i, '').trim();
                             if (!messageText) return null;
                             
-                            // Highlight lines matching audio playback timeline bracket
-                            const rangeStart = (idx / lines.length) * 100;
-                            const rangeEnd = ((idx + 1) / lines.length) * 100;
-                            const isCurrentlyHighlighted = callProgress >= rangeStart && callProgress < rangeEnd;
-                            const isPast = callProgress >= rangeEnd;
+                            const isCurrentlyHighlighted = false;
+                            const isPast = false;
 
                             return (
                               <motion.div 
