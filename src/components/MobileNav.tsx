@@ -1,5 +1,5 @@
 import React from 'react';
-import { Phone, ShoppingBag, Calendar, LayoutGrid, ListCollapse, AlertTriangle, User, TrendingUp } from 'lucide-react';
+import { Phone, ShoppingBag, Calendar, LayoutGrid, ListCollapse, AlertTriangle, User, TrendingUp, PhoneCall } from 'lucide-react';
 
 interface MobileNavProps {
   currentTab: string;
@@ -21,6 +21,7 @@ export default function MobileNav({ currentTab, onTabChange, role, unreadCount =
     { id: 'orders', name: 'Orders', icon: ShoppingBag },
     { id: 'reservations', name: 'Reservations', icon: Calendar },
     { id: 'menu', name: 'Menu', icon: ListCollapse },
+    { id: 'call_logs', name: 'Call Logs', icon: PhoneCall },
     { id: 'escalations', name: 'Alerts', icon: AlertTriangle },
     { id: 'revenue', name: 'Revenue', icon: TrendingUp },
   ];
