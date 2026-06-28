@@ -1269,69 +1269,33 @@ export default function App() {
                     />
                   </motion.div>
                 </motion.div>
+                 {/* Main Dashboard section: orders/timeline divide */}
+                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                   
+                   {/* Left list block - Recent orders preview */}
+                   <div className="lg:col-span-8 space-y-4">
+                     <div className="flex items-center justify-between">
+                       <h3 className="font-bold text-zinc-900 text-base">Active Orders Monitor</h3>
+                       <button onClick={() => setActiveTab('orders')} className="text-xs font-bold text-red-650 flex items-center gap-0.5 hover:underline">
+                         <span>All Orders</span>
+                         <ChevronRight className="w-3.5 h-3.5" />
+                       </button>
+                     </div>
  
-                {/* ElevenLabs Diagnostics & Setup Latency Checklist (Admin Only) */}
-                <div className="bg-white border border-zinc-200 rounded-2xl p-5 shadow-sm">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2 mt-0.5">
-                      <Cpu className="w-5 h-5 text-red-500" />
-                      <div>
-                        <h3 className="font-bold text-sm text-zinc-900 leading-none">Voice Agent Diagnostics & Latency Setup</h3>
-                        <p className="text-[10px] text-zinc-400 mt-1.5">Configure your ElevenLabs Conversational Voice Agent for optimal latency & stability.</p>
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => setShowElevenLabsChecklist(!showElevenLabsChecklist)}
-                      className="px-3 py-1.5 bg-zinc-50 border hover:bg-zinc-100 border-zinc-200 text-zinc-650 rounded-xl text-xs font-bold transition-all cursor-pointer"
-                    >
-                      {showElevenLabsChecklist ? "Hide Panel" : "View Settings Checklist"}
-                    </button>
-                  </div>
- 
-                  {showElevenLabsChecklist && (
-                    <div className="mt-4 border-t border-zinc-100 pt-4 grid grid-cols-1 md:grid-cols-2 gap-6 text-xs text-zinc-600 leading-relaxed">
-                      <div className="space-y-3">
-                        <h4 className="font-bold text-zinc-900 flex items-center gap-1.5">
-                          <CheckCircle2 className="w-4 h-4 text-emerald-500" />
-                          Recommended Console Settings
-                        </h4>
-                        <ul className="space-y-2 pl-4 list-disc">
-                          <li><strong>Agent Model:</strong> Choose <code>gemini-2.5-flash</code> or similar low-latency LLMs on the ElevenLabs Agent Console.</li>
-                          <li><strong>Voice Latency Mode:</strong> Select voice options optimized for low-latency WebRTC streams.</li>
-                          <li><strong>Streaming Options:</strong> Ensure streaming is enabled in voice output configurations.</li>
-                          <li><strong>Stable Mic:</strong> Check client device microphone sample rate matches standard 44.1kHz or 48kHz to avoid cutting.</li>
-                        </ul>
-                      </div>
-                      <div className="space-y-3">
-                        <h4 className="font-bold text-zinc-900 flex items-center gap-1.5">
-                          <Info className="w-4 h-4 text-amber-500" />
-                          Network & Production Precautions
-                        </h4>
-                        <ul className="space-y-2 pl-4 list-disc">
-                          <li><strong>Production Webhook:</strong> Use static production endpoints for final confirmations. Avoid debugging tools/proxies in active setups which cause packet buffering delays.</li>
-                          <li><strong>Network Jitter:</strong> Audio cutting is frequently due to local regional ISP latency or packet drops. WebRTC relies heavily on stable client-side network connections.</li>
-                        </ul>
-                      </div>
-                    </div>
-                  )}
-                </div>
- 
-                {/* Main Dashboard section: orders/timeline divide */}
-                <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-                  
-                  {/* Left list block - Recent orders preview */}
-                  <div className="lg:col-span-8 space-y-4">
-                    <div className="flex items-center justify-between">
-                      <h3 className="font-bold text-zinc-900 text-base">Active Orders Monitor</h3>
-                      <button onClick={() => setActiveTab('orders')} className="text-xs font-bold text-red-600 flex items-center gap-0.5 hover:underline">
-                        <span>All Orders</span>
-                        <ChevronRight className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      {orders.slice(0, 4).map(o => (
-                        <div key={o.id} className="bg-white border border-zinc-200 rounded-2xl p-4 flex flex-col justify-between shadow-sm hover:shadow">
+                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                       {(() => {
+                         const activeOrders = orders.filter(o => o.status !== 'COMPLETED' && o.status !== 'CANCELLED');
+                         if (activeOrders.length === 0) {
+                           return (
+                             <div className="col-span-1 md:col-span-2 flex flex-col items-center justify-center py-12 text-center bg-white border border-zinc-200 rounded-2xl">
+                               <ShoppingBag className="w-8 h-8 text-zinc-300 mb-2" />
+                               <p className="text-sm text-zinc-500 font-semibold">No active orders right now</p>
+                               <p className="text-[10px] text-zinc-400 mt-1">New orders will show up here automatically.</p>
+                             </div>
+                           );
+                         }
+                         return activeOrders.slice(0, 4).map(o => (
+                           <div key={o.id} className="bg-white border border-zinc-200 rounded-2xl p-4 flex flex-col justify-between shadow-sm hover:shadow">
                           <div>
                             <div className="flex items-center justify-between">
                               <span className="font-mono text-xs font-bold bg-zinc-100 border px-1.5 py-0.5 rounded text-zinc-800">
@@ -1357,7 +1321,8 @@ export default function App() {
                             </button>
                           </div>
                         </div>
-                      ))}
+                      ));
+                    })()}
                     </div>
                   </div>
 
