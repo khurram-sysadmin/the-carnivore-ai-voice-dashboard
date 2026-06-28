@@ -14,6 +14,70 @@ interface CallState {
   message: string;
 }
 
+const devanagariVowels: Record<string, string> = {
+  'अ': 'a', 'आ': 'aa', 'इ': 'i', 'ई': 'ee', 'उ': 'u', 'ऊ': 'oo',
+  'ऋ': 'ri', 'ए': 'e', 'ऐ': 'ai', 'ओ': 'o', 'औ': 'au'
+};
+
+const devanagariMatras: Record<string, string> = {
+  'ा': 'aa', 'ि': 'i', 'ी': 'ee', 'ु': 'u', 'ू': 'oo', 'ृ': 'ri',
+  'े': 'e', 'ै': 'ai', 'ो': 'o', 'ौ': 'au'
+};
+
+const devanagariConsonants: Record<string, string> = {
+  'क': 'k', 'ख': 'kh', 'ग': 'g', 'घ': 'gh', 'ङ': 'ng',
+  'च': 'ch', 'छ': 'chh', 'ज': 'j', 'झ': 'jh', 'ञ': 'ny',
+  'ट': 't', 'ठ': 'th', 'ड': 'd', 'ढ': 'dh', 'ण': 'n',
+  'त': 't', 'थ': 'th', 'द': 'd', 'ध': 'dh', 'न': 'n',
+  'प': 'p', 'फ': 'ph', 'ब': 'b', 'भ': 'bh', 'म': 'm',
+  'य': 'y', 'र': 'r', 'ल': 'l', 'व': 'v',
+  'श': 'sh', 'ष': 'sh', 'स': 's', 'ह': 'h',
+  'ड़': 'r', 'ढ़': 'rh', 'क़': 'q', 'ख़': 'kh', 'ग़': 'gh', 'ज़': 'z', 'फ़': 'f'
+};
+
+const romanizeTranscriptText = (text: string) => {
+  if (!/[\u0900-\u097F]/.test(text)) return text;
+
+  let output = '';
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i];
+    const next = text[i + 1];
+
+    if (devanagariVowels[char]) {
+      output += devanagariVowels[char];
+      continue;
+    }
+
+    if (devanagariConsonants[char]) {
+      output += devanagariConsonants[char];
+      if (next === '्') {
+        i++;
+      } else if (devanagariMatras[next]) {
+        output += devanagariMatras[next];
+        i++;
+      } else {
+        output += 'a';
+      }
+      continue;
+    }
+
+    if (char === 'ं' || char === 'ँ') {
+      output += 'n';
+      continue;
+    }
+
+    if (char === 'ः') {
+      output += 'h';
+      continue;
+    }
+
+    if (char === '़') continue;
+    output += devanagariMatras[char] ?? char;
+  }
+
+  return output.replace(/\s+/g, ' ').trim();
+};
+
 export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onClearAction }: CallZaraWidgetProps) {
   const [callState, setCallState] = useState<CallState>({ status: 'idle', message: 'Click to call Zara' });
   const [transcript, setTranscript] = useState<{ speaker: 'Zara' | 'You'; text: string }[]>([]);
@@ -28,6 +92,14 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
   ]);
   const [chatLoading, setChatLoading] = useState(false);
   const [chatSessionState, setChatSessionState] = useState<'idle' | 'connecting' | 'connected' | 'failed'>('idle');
+  const [typedDetails, setTypedDetails] = useState({
+    name: '',
+    phone: '',
+    email: '',
+    address: '',
+    notes: ''
+  });
+  const [detailsSent, setDetailsSent] = useState(false);
   const chatBottomRef = useRef<HTMLDivElement | null>(null);
   
   const callStartTime = useRef<number | null>(null);
@@ -37,34 +109,13 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
   const sessionModeRef = useRef<'voice' | 'chat' | null>(null);
   const pendingChatMessageRef = useRef<string | null>(null);
 
-  // Web Audio API refs for real-time mic reactive wave animation
-  const audioContextRef = useRef<AudioContext | null>(null);
-  const analyserRef = useRef<AnalyserNode | null>(null);
-  const dataArrayRef = useRef<Uint8Array | null>(null);
-  const micStreamRef = useRef<MediaStream | null>(null);
   const animationFrameRef = useRef<number | null>(null);
 
-  // Clean up all audio/stream resources when conversation ends or unmounts
+  // Clean up UI animation resources when conversation ends or unmounts.
   const cleanupAudioVisualizer = () => {
     if (animationFrameRef.current) {
       cancelAnimationFrame(animationFrameRef.current);
       animationFrameRef.current = null;
-    }
-    if (audioContextRef.current) {
-      if (audioContextRef.current.state !== 'closed') {
-        audioContextRef.current.close().catch(e => console.error("Error closing AudioContext:", e));
-      }
-      audioContextRef.current = null;
-    }
-    analyserRef.current = null;
-    dataArrayRef.current = null;
-    if (micStreamRef.current) {
-      try {
-        micStreamRef.current.getTracks().forEach(track => track.stop());
-      } catch (err) {
-        console.error("Error stopping microphone tracks:", err);
-      }
-      micStreamRef.current = null;
     }
   };
 
@@ -175,10 +226,11 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
           // Prevent duplicate consecutive entries with identical text
           const last = prev[prev.length - 1];
           const speaker = msg.source === 'user' ? 'You' : 'Zara';
-          if (last && last.speaker === speaker && last.text === msg.message) {
+          const text = romanizeTranscriptText(msg.message);
+          if (last && last.speaker === speaker && last.text === text) {
             return prev;
           }
-          return [...prev, { speaker, text: msg.message }];
+          return [...prev, { speaker, text }];
         });
       }
     },
@@ -255,12 +307,11 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
     }
   }, [conversation.status]);
 
-  // Drive Waveform Animations using ElevenLabs' actual voice levels/states and Web Audio Analyser
+  // Drive waveform from ElevenLabs SDK levels instead of opening a second mic stream.
   useEffect(() => {
     if (conversation.status === 'connected') {
       let lastTime = 0;
-      const fpsLimit = 24; // Throttle to 24fps to prevent UI thread overload
-      const interval = 1000 / fpsLimit;
+      const interval = 1000 / 24;
 
       const updateWaves = (timestamp: number) => {
         if (!lastTime) lastTime = timestamp;
@@ -276,44 +327,22 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
             return;
           }
 
-          const isZaraSpeaking = conversation.isSpeaking;
-          
-          if (isZaraSpeaking) {
-            // If Zara is speaking, show beautiful sweeping AI waves
-            const time = Date.now() * 0.015;
-            setAudioNodes(prev => prev.map((prevVal, i) => {
-              const base = Math.sin(time + i * 0.5) * 25 + 30;
-              const noise = Math.random() * 12;
-              const target = Math.max(8, Math.min(65, base + noise));
-              return prevVal * 0.65 + target * 0.35;
-            }));
-          } else if (analyserRef.current && dataArrayRef.current) {
-            // If customer is speaking, analyze microphone input in real-time
-            analyserRef.current.getByteFrequencyData(dataArrayRef.current);
-            
-            const frequencies = dataArrayRef.current;
-            const length = frequencies.length;
-            
-            setAudioNodes(prev => prev.map((prevVal, i) => {
-              // Map the 15 bars to the available voice frequency bins
-              const binIdx = Math.floor((i / prev.length) * (length * 0.6));
-              const rawVal = frequencies[binIdx] || 0;
-              // Scale and map to comfortable pixel heights (between 8px and 65px)
-              const mappedVal = (rawVal / 255) * 55 + 8;
-              // Add a tiny bit of ambient dynamic vibration even on silence to show active stream
-              const noise = Math.sin(Date.now() * 0.008 + i) * 1.5 + 3;
-              const target = Math.max(8, Math.min(65, mappedVal + noise));
-              return prevVal * 0.65 + target * 0.35;
-            }));
-          } else {
-            // Idle breathing pulse when nobody is speaking
-            const time = Date.now() * 0.003;
-            setAudioNodes(prev => prev.map((prevVal, i) => {
-              const height = Math.sin(time + i * 0.4) * 3 + 12;
-              const target = Math.max(8, height);
-              return prevVal * 0.75 + target * 0.25;
-            }));
-          }
+          const outputVolume = Number(conversation.getOutputVolume?.() ?? 0);
+          const inputVolume = Number(conversation.getInputVolume?.() ?? 0);
+          const activeVolume = Math.max(outputVolume, inputVolume);
+          const speakerBias = conversation.isSpeaking ? outputVolume : inputVolume;
+          const time = Date.now() * 0.006;
+
+          setAudioNodes(prev => prev.map((prevVal, i) => {
+            const centerDistance = Math.abs(i - (prev.length - 1) / 2) / ((prev.length - 1) / 2);
+            const shape = 1 - centerDistance * 0.55;
+            const breath = Math.sin(time + i * 0.45) * 2;
+            const target = Math.max(
+              8,
+              Math.min(65, 10 + activeVolume * 58 * shape + speakerBias * 14 + breath)
+            );
+            return prevVal * 0.78 + target * 0.22;
+          }));
         }
         
         animationFrameRef.current = requestAnimationFrame(updateWaves);
@@ -341,38 +370,14 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
       return;
     }
     sessionModeRef.current = 'voice';
-    setCallState({ status: 'connecting', message: 'Requesting microphone access...' });
+    setCallState({ status: 'connecting', message: 'Preparing Zara voice session...' });
     setTranscript([]);
+    setDetailsSent(false);
     callStartTime.current = null;
     isCallLogSaved.current = false;
 
     try {
-      // 1. Explicitly request microphone access first
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      micStreamRef.current = stream;
-
-      // Initialize real-time Web Audio API Analyser for voice visualization
-      try {
-        const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
-        const audioCtx = new AudioContextClass();
-        const analyser = audioCtx.createAnalyser();
-        analyser.fftSize = 64; // Generates 32 frequency bins, ideal for our 15 visualization nodes
-        analyser.smoothingTimeConstant = 0.6; // Slightly smooth out high-frequency transients
-        
-        const source = audioCtx.createMediaStreamSource(stream);
-        source.connect(analyser); // Analyser only. Do NOT connect to audioCtx.destination to prevent speaker feedback echo.
-        
-        const bufferLength = analyser.frequencyBinCount;
-        const dataArray = new Uint8Array(bufferLength);
-        
-        audioContextRef.current = audioCtx;
-        analyserRef.current = analyser;
-        dataArrayRef.current = dataArray;
-      } catch (ae) {
-        console.error("Failed to initialize Web Audio Analyser:", ae);
-      }
-
-      // 2. Fetch signed URL or public Agent ID from our secure backend endpoint
+      // 1. Fetch signed URL or public Agent ID from our secure backend endpoint.
       const res = await fetch('/api/elevenlabs/session');
       if (!res.ok) {
         throw new Error("ElevenLabs is not configured. Please add ELEVENLABS_AGENT_ID and ELEVENLABS_API_KEY in the backend environment.");
@@ -385,7 +390,7 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
 
       console.log("ElevenLabs session configurations retrieved successfully:", data);
 
-      // 3. Initiate conversational session
+      // 2. Initiate the conversational session. The ElevenLabs SDK owns microphone capture.
       if (data.signedUrl) {
         // Authenticated flow using secure signed URL
         await conversation.startSession({
@@ -476,6 +481,35 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
       console.error("Failed to log escalation:", err);
       handleEndCall();
     });
+  };
+
+  const handleTypedDetailsSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+
+    if (conversation.status !== 'connected' || sessionModeRef.current !== 'voice') return;
+
+    const entries = [
+      ['Name', typedDetails.name.trim()],
+      ['Phone', typedDetails.phone.trim()],
+      ['Email', typedDetails.email.trim()],
+      ['Delivery address', typedDetails.address.trim()],
+      ['Notes', typedDetails.notes.trim()]
+    ].filter(([, value]) => value);
+
+    if (entries.length === 0) return;
+
+    const detailText = entries.map(([label, value]) => `${label}: ${value}`).join('\n');
+    const message = `The customer typed these exact details in the dashboard. Use typed details as authoritative and do not ask the customer to spell them by voice. Confirm only if needed.\n${detailText}`;
+
+    try {
+      conversation.sendUserMessage(message);
+      const transcriptEntry = romanizeTranscriptText(`Typed details sent:\n${detailText}`);
+      setTranscript(prev => [...prev, { speaker: 'You', text: transcriptEntry }]);
+      setDetailsSent(true);
+    } catch (err) {
+      console.error("Failed to send typed details to Zara:", err);
+      setDetailsSent(false);
+    }
   };
 
   // Auto-scroll chat to bottom
@@ -756,6 +790,76 @@ return (
                   </div>
                 )}
               </div>
+
+              {/* Typed details handoff for exact email/address values */}
+              <form onSubmit={handleTypedDetailsSubmit} className="bg-zinc-950/80 border border-zinc-800 rounded-xl p-3">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1.5 mb-2">
+                  <div>
+                    <p className="text-xs font-bold text-zinc-200">Type exact details</p>
+                    <p className="text-[10px] text-zinc-500">Best for email, phone, and delivery address.</p>
+                  </div>
+                  {detailsSent && <span className="text-[10px] font-bold text-emerald-400">Sent to Zara</span>}
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <input
+                    value={typedDetails.name}
+                    onChange={e => {
+                      setDetailsSent(false);
+                      setTypedDetails(prev => ({ ...prev, name: e.target.value }));
+                    }}
+                    placeholder="Name"
+                    className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:ring-1 focus:ring-red-500"
+                  />
+                  <input
+                    value={typedDetails.phone}
+                    onChange={e => {
+                      setDetailsSent(false);
+                      setTypedDetails(prev => ({ ...prev, phone: e.target.value }));
+                    }}
+                    placeholder="Phone"
+                    className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:ring-1 focus:ring-red-500"
+                  />
+                  <input
+                    value={typedDetails.email}
+                    onChange={e => {
+                      setDetailsSent(false);
+                      setTypedDetails(prev => ({ ...prev, email: e.target.value }));
+                    }}
+                    placeholder="Email"
+                    type="email"
+                    className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:ring-1 focus:ring-red-500"
+                  />
+                  <input
+                    value={typedDetails.address}
+                    onChange={e => {
+                      setDetailsSent(false);
+                      setTypedDetails(prev => ({ ...prev, address: e.target.value }));
+                    }}
+                    placeholder="Delivery address"
+                    className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:ring-1 focus:ring-red-500"
+                  />
+                </div>
+
+                <div className="flex gap-2 mt-2">
+                  <input
+                    value={typedDetails.notes}
+                    onChange={e => {
+                      setDetailsSent(false);
+                      setTypedDetails(prev => ({ ...prev, notes: e.target.value }));
+                    }}
+                    placeholder="Optional note"
+                    className="flex-1 bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:ring-1 focus:ring-red-500"
+                  />
+                  <button
+                    type="submit"
+                    className="bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-white px-3 py-2 rounded-lg text-xs font-bold flex items-center gap-1.5"
+                  >
+                    <Send className="w-3.5 h-3.5" />
+                    Send
+                  </button>
+                </div>
+              </form>
 
               {/* Muted alert */}
               {isMuted && (
