@@ -208,6 +208,8 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
   const voiceConversationRef = useRef<any>(null);
   const sessionModeRef = useRef<'voice' | 'chat' | null>(null);
   const pendingChatMessageRef = useRef<string | null>(null);
+  const conversationIdRef = useRef<string>('');
+  const sessionAgentIdRef = useRef<string>('');
 
   const animationFrameRef = useRef<number | null>(null);
 
@@ -226,8 +228,11 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
 
   // Initialize ElevenLabs Conversational AI
   const conversation = useConversation({
-    onConnect: () => {
-      console.log("ElevenLabs Connected successfully!", sessionModeRef.current);
+    onConnect: (event?: { conversationId?: string }) => {
+      console.log("ElevenLabs Connected successfully!", sessionModeRef.current, event?.conversationId);
+      if (event?.conversationId) {
+        conversationIdRef.current = event.conversationId;
+      }
 
       if (sessionModeRef.current === 'chat') {
         setChatSessionState('connected');
@@ -274,7 +279,7 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
       cleanupAudioVisualizer();
       
       // Save Call Log if not already saved (e.g., via escalation)
-      if (!isCallLogSaved.current && transcriptRef.current.length > 0) {
+      if (!isCallLogSaved.current && (transcriptRef.current.length > 0 || conversationIdRef.current)) {
         isCallLogSaved.current = true;
         const duration = callStartTime.current ? Math.round((Date.now() - callStartTime.current) / 1000) : 0;
         fetch('/api/call-logs', {
@@ -285,7 +290,10 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
             customer_phone: 'Active Live Session',
             duration_seconds: duration,
             transcript: transcriptRef.current.map(t => `${t.speaker}: ${t.text}`).join('\n'),
-            status: 'COMPLETED'
+            status: 'COMPLETED',
+            conversation_id: conversationIdRef.current,
+            agent_id: sessionAgentIdRef.current,
+            source: 'dashboard'
           })
         })
         .then(() => {
@@ -527,6 +535,8 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
     setCallState({ status: 'connecting', message: 'Preparing Zara voice session...' });
     setTranscript([]);
     setDetailsSent(false);
+    conversationIdRef.current = '';
+    sessionAgentIdRef.current = '';
     callStartTime.current = null;
     isCallLogSaved.current = false;
 
@@ -543,6 +553,7 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
       }
 
       console.log("ElevenLabs session configurations retrieved successfully:", data);
+      sessionAgentIdRef.current = data.agentId || '';
 
       // 2. Initiate the conversational session. The ElevenLabs SDK owns microphone capture.
       if (data.signedUrl) {
@@ -622,7 +633,10 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
           customer_phone: 'Active Live Session',
           duration_seconds: duration,
           transcript: currentTranscript.map(t => `${t.speaker}: ${t.text}`).join('\n'),
-          status: 'ESCALATED'
+          status: 'ESCALATED',
+          conversation_id: conversationIdRef.current,
+          agent_id: sessionAgentIdRef.current,
+          source: 'dashboard'
         })
       });
     })

@@ -646,6 +646,251 @@ app.get("/api/elevenlabs/session", async (req, res) => {
   res.json({ agentId });
 });
 
+// ----------------------------------------------------------------------------
+// ElevenLabs conversation history helpers
+// ----------------------------------------------------------------------------
+type DashboardCallLog = {
+  id: string;
+  conversation_id?: string;
+  agent_id?: string;
+  customer_name: string;
+  customer_phone: string;
+  duration_seconds: number;
+  transcript: string;
+  transcript_summary?: string;
+  audio_url?: string;
+  has_audio?: boolean;
+  main_language?: string;
+  source?: "elevenlabs" | "dashboard" | "demo";
+  status: "COMPLETED" | "ESCALATED" | "FAILED";
+  created_at: string;
+};
+
+const getElevenLabsConfig = () => {
+  const agentId = process.env.ELEVENLABS_AGENT_ID || process.env.VITE_ELEVENLABS_AGENT_ID;
+  const apiKey = process.env.ELEVENLABS_API_KEY;
+  const configured =
+    !!agentId &&
+    !!apiKey &&
+    agentId !== "zara_default_agent" &&
+    agentId !== "your-elevenlabs-agent-id" &&
+    apiKey !== "your-elevenlabs-api-key";
+
+  return { agentId, apiKey, configured };
+};
+
+const toIsoTimestamp = (value: any) => {
+  if (!value) return new Date().toISOString();
+  if (typeof value === "number") {
+    const ms = value > 10_000_000_000 ? value : value * 1000;
+    return new Date(ms).toISOString();
+  }
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? new Date().toISOString() : parsed.toISOString();
+};
+
+const normalizeCallStatus = (value: any): DashboardCallLog["status"] => {
+  const status = String(value || "").toLowerCase();
+  if (status.includes("fail") || status.includes("error") || status.includes("unsuccess")) return "FAILED";
+  if (status.includes("escalat") || status.includes("transfer")) return "ESCALATED";
+  return "COMPLETED";
+};
+
+const readDurationSeconds = (conversation: any) => {
+  const raw =
+    conversation?.call_duration_secs ??
+    conversation?.duration_seconds ??
+    conversation?.conversation_duration_secs ??
+    conversation?.metadata?.call_duration_secs ??
+    conversation?.metadata?.duration_seconds ??
+    0;
+  const value = Number(raw);
+  return Number.isFinite(value) ? Math.max(0, Math.round(value)) : 0;
+};
+
+const readCreatedAt = (conversation: any) => {
+  return toIsoTimestamp(
+    conversation?.start_time_unix_secs ??
+    conversation?.created_at_unix_secs ??
+    conversation?.created_at ??
+    conversation?.start_time ??
+    conversation?.metadata?.start_time_unix_secs
+  );
+};
+
+const textFromTranscriptEntry = (entry: any) => {
+  if (!entry || typeof entry !== "object") return "";
+  return String(
+    entry.message ??
+    entry.text ??
+    entry.content ??
+    entry.transcript ??
+    entry.user_transcript ??
+    entry.agent_response ??
+    ""
+  ).trim();
+};
+
+const speakerFromTranscriptEntry = (entry: any) => {
+  const role = String(entry?.role ?? entry?.speaker ?? entry?.source ?? entry?.type ?? "").toLowerCase();
+  if (role.includes("user") || role.includes("customer") || role.includes("human")) return "You";
+  return "Zara";
+};
+
+const formatElevenLabsTranscript = (conversation: any) => {
+  const transcript = conversation?.transcript ?? conversation?.conversation?.transcript ?? [];
+  if (Array.isArray(transcript)) {
+    const lines = transcript
+      .map((entry: any) => {
+        const text = textFromTranscriptEntry(entry);
+        if (!text) return "";
+        return `${speakerFromTranscriptEntry(entry)}: ${text}`;
+      })
+      .filter(Boolean);
+
+    if (lines.length > 0) return lines.join("\n");
+  }
+
+  const summary =
+    conversation?.analysis?.transcript_summary ??
+    conversation?.transcript_summary ??
+    conversation?.summary ??
+    "";
+  return summary ? `Zara: Conversation summary: ${summary}` : "";
+};
+
+const extractCustomerName = (conversation: any, transcript: string) => {
+  const direct =
+    conversation?.metadata?.customer_name ??
+    conversation?.customer_name ??
+    conversation?.dynamic_variables?.customer_name ??
+    conversation?.conversation_initiation_client_data?.dynamic_variables?.customer_name;
+  if (direct) return String(direct);
+
+  const match = transcript.match(/\bmy name is\s+([A-Za-z][A-Za-z\s.'-]{1,60})/i);
+  if (match?.[1]) {
+    return match[1].replace(/\s+(and|phone|email|number).*$/i, "").trim();
+  }
+
+  return "ElevenLabs Caller";
+};
+
+const extractCustomerPhone = (conversation: any, transcript: string) => {
+  const direct =
+    conversation?.metadata?.customer_phone ??
+    conversation?.customer_phone ??
+    conversation?.dynamic_variables?.caller_phone ??
+    conversation?.conversation_initiation_client_data?.dynamic_variables?.caller_phone;
+  if (direct) return String(direct);
+
+  const match = transcript.match(/(?:\+?\d[\d\s().-]{7,}\d)/);
+  return match?.[0]?.replace(/[^\d+]/g, "") || "Voice Session";
+};
+
+const looksLikeSeedCallLog = (log: any) => {
+  const name = String(log?.customer_name || "").toLowerCase();
+  const transcript = String(log?.transcript || "").toLowerCase();
+  return (
+    (name === "hamza khan" && transcript.includes("lamb shank available today")) ||
+    (name === "ayesha ahmed" && transcript.includes("reserve a table for tonight")) ||
+    (name === "marcus aurelius" && transcript.includes("severe allergies"))
+  );
+};
+
+const normalizeSavedCallLog = (log: any): DashboardCallLog => ({
+  id: String(log.id),
+  conversation_id: log.conversation_id || undefined,
+  agent_id: log.agent_id || undefined,
+  customer_name: log.customer_name || "Voice Caller",
+  customer_phone: log.customer_phone || "Voice Session",
+  duration_seconds: Number(log.duration_seconds || 0),
+  transcript: log.transcript || "",
+  transcript_summary: log.transcript_summary || undefined,
+  audio_url: log.audio_url || undefined,
+  has_audio: Boolean(log.audio_url || log.has_audio),
+  main_language: log.main_language || undefined,
+  source: log.source || (looksLikeSeedCallLog(log) ? "demo" : "dashboard"),
+  status: normalizeCallStatus(log.status),
+  created_at: log.created_at || new Date().toISOString()
+});
+
+const normalizeElevenLabsConversation = (conversation: any, agentId: string): DashboardCallLog | null => {
+  const conversationId = conversation?.conversation_id || conversation?.id;
+  if (!conversationId) return null;
+
+  const transcript = formatElevenLabsTranscript(conversation);
+  const status =
+    conversation?.status ??
+    conversation?.call_successful ??
+    conversation?.analysis?.call_successful;
+
+  return {
+    id: `elevenlabs-${conversationId}`,
+    conversation_id: conversationId,
+    agent_id: conversation?.agent_id || agentId,
+    customer_name: extractCustomerName(conversation, transcript),
+    customer_phone: extractCustomerPhone(conversation, transcript),
+    duration_seconds: readDurationSeconds(conversation),
+    transcript,
+    transcript_summary: conversation?.analysis?.transcript_summary ?? conversation?.transcript_summary ?? undefined,
+    audio_url: `/api/call-logs/${encodeURIComponent(conversationId)}/audio`,
+    has_audio: true,
+    main_language: conversation?.main_language ?? conversation?.analysis?.main_language ?? undefined,
+    source: "elevenlabs",
+    status: normalizeCallStatus(status),
+    created_at: readCreatedAt(conversation)
+  };
+};
+
+async function fetchElevenLabsCallLogs(limit = 25): Promise<DashboardCallLog[]> {
+  const { agentId, apiKey, configured } = getElevenLabsConfig();
+  if (!configured || !agentId || !apiKey) return [];
+
+  try {
+    const listUrl = `https://api.elevenlabs.io/v1/convai/conversations?agent_id=${encodeURIComponent(agentId)}&page_size=${limit}`;
+    const listResponse = await fetch(listUrl, {
+      headers: { "xi-api-key": apiKey },
+      signal: AbortSignal.timeout(12_000)
+    });
+
+    if (!listResponse.ok) {
+      console.warn("Failed to fetch ElevenLabs conversations:", await listResponse.text());
+      return [];
+    }
+
+    const listPayload = await listResponse.json();
+    const summaries = listPayload.conversations ?? listPayload.items ?? listPayload.results ?? [];
+    if (!Array.isArray(summaries)) return [];
+
+    const details = await Promise.all(
+      summaries.slice(0, limit).map(async (summary: any) => {
+        const conversationId = summary?.conversation_id || summary?.id;
+        if (!conversationId) return summary;
+
+        try {
+          const detailResponse = await fetch(`https://api.elevenlabs.io/v1/convai/conversations/${encodeURIComponent(conversationId)}`, {
+            headers: { "xi-api-key": apiKey },
+            signal: AbortSignal.timeout(12_000)
+          });
+          if (!detailResponse.ok) return summary;
+          return { ...summary, ...(await detailResponse.json()) };
+        } catch (error) {
+          console.warn(`Failed to fetch ElevenLabs conversation ${conversationId}:`, error);
+          return summary;
+        }
+      })
+    );
+
+    return details
+      .map(detail => normalizeElevenLabsConversation(detail, agentId))
+      .filter((log): log is DashboardCallLog => Boolean(log))
+      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+  } catch (error) {
+    console.warn("Unable to sync ElevenLabs call logs:", error);
+    return [];
+  }
+}
+
 // 1.5 Text Chat Zara Agent Endpoint
 app.post("/api/chat", async (req, res) => {
   const { messages } = req.body;
@@ -1428,21 +1673,53 @@ app.post("/api/escalations", async (req, res) => {
 
 // 6.5 Call Logs Routing
 app.get("/api/call-logs", requireOwnerAuth, async (req, res) => {
+  const { configured: elevenLabsConfigured } = getElevenLabsConfig();
+  const elevenLabsLogs = await fetchElevenLabsCallLogs();
+  let savedLogs: DashboardCallLog[] = [];
+
   if (supabase && !missingTables.has("call_logs")) {
     const { data, error } = await supabase.from("call_logs").select("*").order("created_at", { ascending: false });
-    if (!error && data) return res.json(data);
-    handleSupabaseError("call_logs", error, "fetch");
+    if (!error && data) {
+      savedLogs = data.map(normalizeSavedCallLog);
+    } else {
+      handleSupabaseError("call_logs", error, "fetch");
+    }
+  } else {
+    savedLogs = localCallLogs.map(normalizeSavedCallLog);
   }
-  res.json(localCallLogs);
+
+  const filteredSavedLogs = elevenLabsConfigured
+    ? savedLogs.filter(log => log.source !== "demo")
+    : savedLogs;
+
+  const merged = [...elevenLabsLogs];
+  const existingKeys = new Set(merged.map(log => log.conversation_id || log.id));
+
+  for (const log of filteredSavedLogs) {
+    const key = log.conversation_id || log.id;
+    if (!existingKeys.has(key)) {
+      merged.push(log);
+      existingKeys.add(key);
+    }
+  }
+
+  merged.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+  res.json(merged);
 });
 
 app.post("/api/call-logs", async (req, res) => {
   const newCallLog = {
     id: `call-${Date.now()}`,
+    conversation_id: req.body.conversation_id || req.body.conversationId || "",
+    agent_id: req.body.agent_id || req.body.agentId || process.env.ELEVENLABS_AGENT_ID || process.env.VITE_ELEVENLABS_AGENT_ID || "",
     customer_name: req.body.customer_name || "Voice Caller",
     customer_phone: req.body.customer_phone || "Active Live Session",
     duration_seconds: req.body.duration_seconds || 0,
     transcript: req.body.transcript || "",
+    transcript_summary: req.body.transcript_summary || "",
+    audio_url: req.body.audio_url || "",
+    main_language: req.body.main_language || "",
+    source: req.body.source || "dashboard",
     status: req.body.status || "COMPLETED",
     created_at: new Date().toISOString()
   };
@@ -1455,12 +1732,52 @@ app.post("/api/call-logs", async (req, res) => {
       transcript: newCallLog.transcript,
       status: newCallLog.status
     }]).select();
-    if (!error && data) return res.status(201).json(data[0]);
+    if (!error && data) {
+      return res.status(201).json({
+        ...normalizeSavedCallLog(data[0]),
+        conversation_id: newCallLog.conversation_id || undefined,
+        agent_id: newCallLog.agent_id || undefined,
+        audio_url: newCallLog.conversation_id ? `/api/call-logs/${encodeURIComponent(newCallLog.conversation_id)}/audio` : undefined,
+        has_audio: Boolean(newCallLog.conversation_id),
+        source: "dashboard"
+      });
+    }
     handleSupabaseError("call_logs", error, "insert");
   }
 
   localCallLogs.unshift(newCallLog);
   res.status(201).json(newCallLog);
+});
+
+app.get("/api/call-logs/:conversationId/audio", requireOwnerAuth, async (req, res) => {
+  const { apiKey, configured } = getElevenLabsConfig();
+  const conversationId = req.params.conversationId;
+
+  if (!configured || !apiKey) {
+    return res.status(404).json({ error: "ElevenLabs API key is not configured for recording playback." });
+  }
+
+  try {
+    const audioResponse = await fetch(`https://api.elevenlabs.io/v1/convai/conversations/${encodeURIComponent(conversationId)}/audio`, {
+      headers: { "xi-api-key": apiKey },
+      signal: AbortSignal.timeout(20_000)
+    });
+
+    if (!audioResponse.ok) {
+      const body = await audioResponse.text();
+      return res.status(audioResponse.status).json({ error: body || "Recording is not available for this conversation yet." });
+    }
+
+    const contentType = audioResponse.headers.get("content-type") || "audio/mpeg";
+    const audioBuffer = Buffer.from(await audioResponse.arrayBuffer());
+    res.setHeader("Content-Type", contentType);
+    res.setHeader("Content-Length", audioBuffer.length);
+    res.setHeader("Cache-Control", "private, max-age=300");
+    return res.send(audioBuffer);
+  } catch (error: any) {
+    console.warn(`Failed to stream ElevenLabs audio for ${conversationId}:`, error);
+    return res.status(502).json({ error: "Could not fetch the ElevenLabs recording right now." });
+  }
 });
 
 // 7. Combined Activity Timeline

@@ -1735,6 +1735,11 @@ export default function App() {
                           </span>
                         </div>
                         <h4 className="font-bold text-zinc-900 mt-2 text-lg">{selectedCallLog.customer_name}</h4>
+                        {selectedCallLog.conversation_id && (
+                          <p className="text-[10px] text-zinc-400 mt-1 font-mono">
+                            ElevenLabs conversation: {selectedCallLog.conversation_id}
+                          </p>
+                        )}
                         <p className="text-xs text-zinc-500 mt-0.5">{selectedCallLog.customer_phone} • {selectedCallLog.duration_seconds}s call duration</p>
                       </div>
 
@@ -1774,7 +1779,33 @@ export default function App() {
                         );
                       })()}
 
-                      {/* Simulated Audio Player Controls */}
+                      {/* Real ElevenLabs Recording */}
+                      {selectedCallLog.audio_url && (
+                        <div className="mb-4 bg-zinc-950 text-white rounded-2xl p-4 border border-zinc-800 shadow-lg space-y-2">
+                          <div className="flex items-center justify-between gap-3">
+                            <span className="text-[10px] font-black uppercase tracking-wider text-zinc-400 flex items-center gap-1">
+                              <Volume2 className="w-3.5 h-3.5 text-red-500" />
+                              ElevenLabs Recording
+                            </span>
+                            <span className="text-[9px] font-bold uppercase text-emerald-400">
+                              Real Audio
+                            </span>
+                          </div>
+                          <audio
+                            controls
+                            preload="none"
+                            src={selectedCallLog.audio_url}
+                            className="w-full h-10 rounded-lg"
+                          >
+                            Your browser does not support audio playback.
+                          </audio>
+                          <p className="text-[10px] text-zinc-500">
+                            Playback is streamed securely from ElevenLabs for owner sessions.
+                          </p>
+                        </div>
+                      )}
+
+                      {/* Transcript Timeline Controls */}
                       {(() => {
                         const totalSec = selectedCallLog.duration_seconds || 60;
                         const currSec = (callProgress / 100) * totalSec;
@@ -1810,7 +1841,7 @@ export default function App() {
                                 <div className="flex justify-between items-center text-[10px] text-zinc-400 font-mono mb-1">
                                   <span className="flex items-center gap-1">
                                     <Volume2 className="w-3 h-3 text-red-500 animate-pulse" />
-                                    VOICE PLAYBACK
+                                    TRANSCRIPT TIMELINE
                                   </span>
                                   <span>{formatTime(currSec)} / {formatTime(totalSec)}</span>
                                 </div>

@@ -99,10 +99,17 @@ export interface EscalationItem {
 
 export interface CallLog {
   id: string;
+  conversation_id?: string;
+  agent_id?: string;
   customer_name: string;
   customer_phone: string;
   duration_seconds: number;
   transcript: string;
+  transcript_summary?: string;
+  audio_url?: string;
+  has_audio?: boolean;
+  main_language?: string;
+  source?: 'elevenlabs' | 'dashboard' | 'demo';
   status: 'COMPLETED' | 'ESCALATED' | 'FAILED';
   created_at: string;
 }
