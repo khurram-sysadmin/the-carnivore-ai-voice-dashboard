@@ -83,6 +83,12 @@ export interface FeedbackItem {
   comment: string;
   status: 'NEW' | 'REVIEWED' | 'ARCHIVED';
   created_at: string;
+  latest_order_number?: string;
+  latest_order_summary?: string;
+  latest_order_total?: number;
+  latest_reservation_number?: string;
+  latest_reservation_details?: string;
+  matched_record_type?: 'order' | 'reservation' | 'none';
 }
 
 export interface EscalationItem {

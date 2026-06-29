@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Sparkles, Phone, ShoppingBag, Calendar, ListCollapse, AlertTriangle, ShieldCheck, 
@@ -149,7 +149,10 @@ export default function App() {
   const [fbRating, setFbRating] = useState(5);
   const [fbComment, setFbComment] = useState('');
   const [fbSuccess, setFbSuccess] = useState(false);
+  const [showPostCallFeedback, setShowPostCallFeedback] = useState(false);
+  const [postCallContext, setPostCallContext] = useState<any>(null);
   const [showElevenLabsChecklist, setShowElevenLabsChecklist] = useState(false);
+  const lastPendingEscalationCount = useRef<number | null>(null);
 
   // Revenue filters state
   const [revDateFilter, setRevDateFilter] = useState('');
@@ -225,6 +228,44 @@ export default function App() {
     const interval = setInterval(loadData, 10000);
     return () => clearInterval(interval);
   }, [isOwnerAuthenticated]);
+
+  useEffect(() => {
+    if (!isOwnerAuthenticated) {
+      lastPendingEscalationCount.current = null;
+      return;
+    }
+
+    const pendingCount = escalations.filter(e => e.status === 'PENDING').length;
+    const previousCount = lastPendingEscalationCount.current;
+
+    if (previousCount !== null && pendingCount > previousCount) {
+      try {
+        const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+        if (AudioCtx) {
+          const audioCtx = new AudioCtx();
+          const oscillator = audioCtx.createOscillator();
+          const gain = audioCtx.createGain();
+
+          oscillator.type = 'sine';
+          oscillator.frequency.setValueAtTime(880, audioCtx.currentTime);
+          oscillator.frequency.setValueAtTime(660, audioCtx.currentTime + 0.16);
+          gain.gain.setValueAtTime(0.001, audioCtx.currentTime);
+          gain.gain.exponentialRampToValueAtTime(0.18, audioCtx.currentTime + 0.03);
+          gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.35);
+          oscillator.connect(gain);
+          gain.connect(audioCtx.destination);
+          oscillator.start();
+          oscillator.stop(audioCtx.currentTime + 0.38);
+        }
+      } catch (err) {
+        console.warn('Escalation alert sound was blocked by the browser.', err);
+      }
+
+      showToast('New urgent escalation received. Check Escalations & Feedback.', 'error');
+    }
+
+    lastPendingEscalationCount.current = pendingCount;
+  }, [escalations, isOwnerAuthenticated]);
 
   // Auto-select first call log if none is selected
   useEffect(() => {
@@ -475,8 +516,8 @@ export default function App() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         customer_name: fbName,
-        customer_phone: fbPhone || '+15550001111',
-        customer_email: fbEmail || 'feedback@thecarnivore.com',
+        customer_phone: fbPhone,
+        customer_email: fbEmail,
         rating: fbRating,
         comment: fbComment
       })
@@ -485,12 +526,40 @@ export default function App() {
       setFbSuccess(true);
       showToast("Thank you for your valuable feedback!");
       setFbName('');
+      setFbPhone('');
+      setFbEmail('');
       setFbComment('');
+      setShowPostCallFeedback(false);
+      setPostCallContext(null);
       loadData();
     });
   };
 
   // Pre-load Voice context
+  const handleCallRecordCreated = (record?: any) => {
+    loadData();
+
+    if (role !== 'customer' || record?.source === 'chat') return;
+
+    setPostCallContext(record || null);
+    setFbSuccess(false);
+
+    const phone = record?.customer_phone && record.customer_phone !== 'Active Live Session'
+      ? record.customer_phone
+      : '';
+    const email = record?.customer_email && !String(record.customer_email).includes('@thecarnivore.local')
+      ? record.customer_email
+      : '';
+    const name = record?.customer_name && !['Voice Caller', 'Voice caller'].includes(record.customer_name)
+      ? record.customer_name
+      : '';
+
+    setFbPhone(phone);
+    setFbEmail(email);
+    setFbName(name);
+    setShowPostCallFeedback(true);
+  };
+
   const triggerVoiceAction = (action: string) => {
     setSelectedVoiceAction(action);
     setActiveTab('call');
@@ -529,6 +598,7 @@ export default function App() {
     .reduce((sum, o) => sum + Number(o.total_amount), 0);
 
   const pendingOrders = orders.filter(o => o.status === 'RECEIVED' || o.status === 'PREPARING').length;
+  const pendingEscalations = escalations.filter(e => e.status === 'PENDING');
   const resToday = reservations.filter(r => r.status !== 'CANCELLED' && new Date(r.reservation_date).toDateString() === new Date().toDateString()).length;
   const cancellationsToday = orders.filter(o => o.status === 'CANCELLED' && new Date(o.created_at).toDateString() === new Date().toDateString()).length +
                              reservations.filter(r => r.status === 'CANCELLED' && new Date(r.created_at).toDateString() === new Date().toDateString()).length;
@@ -817,7 +887,7 @@ export default function App() {
                   >
                     {/* The voice controller */}
                     <CallZaraWidget 
-                      onRecordCreated={loadData} 
+                      onRecordCreated={handleCallRecordCreated} 
                       preSelectedAction={selectedVoiceAction}
                       onClearAction={() => setSelectedVoiceAction('')}
                     />
@@ -1106,6 +1176,30 @@ export default function App() {
                       />
                     </div>
 
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <div>
+                        <label className="text-[10px] font-bold uppercase tracking-wider text-zinc-400 block mb-1">Phone</label>
+                        <input
+                          type="tel"
+                          value={fbPhone}
+                          onChange={e => setFbPhone(e.target.value)}
+                          placeholder="0333 738 4752"
+                          className="w-full bg-zinc-50 border border-zinc-200 rounded-xl px-3 py-2 text-xs text-zinc-800 focus:outline-none focus:bg-white"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="text-[10px] font-bold uppercase tracking-wider text-zinc-400 block mb-1">Email</label>
+                        <input
+                          type="email"
+                          value={fbEmail}
+                          onChange={e => setFbEmail(e.target.value)}
+                          placeholder="you@example.com"
+                          className="w-full bg-zinc-50 border border-zinc-200 rounded-xl px-3 py-2 text-xs text-zinc-800 focus:outline-none focus:bg-white"
+                        />
+                      </div>
+                    </div>
+
                     <div>
                       <label className="text-[10px] font-bold uppercase tracking-wider text-zinc-400 block mb-1">Call Rating</label>
                       <div className="flex gap-1.5 mt-1">
@@ -1268,6 +1362,31 @@ export default function App() {
 
           {/* Owner Dashboard Content wrapper */}
           <main className="flex-1 p-4 md:p-6 space-y-6 pb-24 md:pb-10">
+            {pendingEscalations.length > 0 && (
+              <motion.div
+                initial={{ opacity: 0, y: -8 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="bg-rose-50 border border-rose-200 rounded-2xl p-4 shadow-sm flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3"
+              >
+                <div className="flex items-start gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-rose-600 text-white flex items-center justify-center shadow-sm shadow-rose-600/20">
+                    <AlertTriangle className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-black text-rose-900">Urgent callback request waiting</p>
+                    <p className="text-xs text-rose-700 mt-0.5">
+                      {pendingEscalations.length} customer escalation{pendingEscalations.length === 1 ? '' : 's'} need owner attention.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setActiveTab('escalations')}
+                  className="bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold px-4 py-2 rounded-xl shadow-sm transition-colors"
+                >
+                  Open Escalations
+                </button>
+              </motion.div>
+            )}
             
 
             
@@ -2078,9 +2197,12 @@ export default function App() {
                     Customer Reviews Log
                   </h3>
 
-                  <div className="space-y-4">
+                  {feedback.length === 0 ? (
+                    <p className="text-xs text-zinc-400 italic py-6 text-center">No customer feedback yet.</p>
+                  ) : (
+                    <div className="space-y-4">
                     {feedback.map(fb => (
-                      <div key={fb.id} className="border border-zinc-150 rounded-xl p-4 space-y-2">
+                      <div key={fb.id} className="border border-zinc-150 rounded-xl p-4 space-y-3 bg-white">
                         <div className="flex items-center justify-between">
                           <span className="font-bold text-xs text-zinc-800">{fb.customer_name}</span>
                           <div className="flex gap-0.5">
@@ -2089,11 +2211,34 @@ export default function App() {
                             ))}
                           </div>
                         </div>
+                        <div className="flex flex-wrap gap-2 text-[10px] font-bold">
+                          {fb.customer_phone && (
+                            <span className="bg-zinc-100 text-zinc-600 border border-zinc-200 px-2 py-1 rounded-full">{fb.customer_phone}</span>
+                          )}
+                          {fb.customer_email && (
+                            <span className="bg-zinc-100 text-zinc-600 border border-zinc-200 px-2 py-1 rounded-full">{fb.customer_email}</span>
+                          )}
+                        </div>
                         <p className="text-xs text-zinc-600 italic">"{fb.comment}"</p>
+                        {fb.latest_order_number ? (
+                          <div className="bg-amber-50 border border-amber-100 rounded-xl p-3 text-[11px] text-amber-900 space-y-1">
+                            <p className="font-black uppercase tracking-wide">Related order {fb.latest_order_number}</p>
+                            <p className="font-semibold">{fb.latest_order_summary || 'Order items unavailable'}</p>
+                            <p className="font-bold">Total: PKR {Number(fb.latest_order_total || 0).toLocaleString()}</p>
+                          </div>
+                        ) : fb.latest_reservation_number ? (
+                          <div className="bg-teal-50 border border-teal-100 rounded-xl p-3 text-[11px] text-teal-900 space-y-1">
+                            <p className="font-black uppercase tracking-wide">Related reservation {fb.latest_reservation_number}</p>
+                            <p className="font-semibold">{fb.latest_reservation_details}</p>
+                          </div>
+                        ) : (
+                          <p className="text-[10px] font-semibold text-zinc-400">No matching order or reservation found yet.</p>
+                        )}
                         <span className="text-[9px] text-zinc-400 block">{new Date(fb.created_at).toLocaleDateString()}</span>
                       </div>
                     ))}
-                  </div>
+                    </div>
+                  )}
                 </div>
 
               </div>
@@ -2318,10 +2463,140 @@ export default function App() {
           </main>
 
           {/* Mobile Admin navigation bar */}
-          <MobileNav currentTab={activeTab} onTabChange={setActiveTab} role="owner" unreadCount={escalations.filter(e => e.status === 'PENDING').length} />
+          <MobileNav currentTab={activeTab} onTabChange={setActiveTab} role="owner" unreadCount={pendingEscalations.length} />
 
         </div>
       )}
+
+      {/* Post-call feedback prompt */}
+      <AnimatePresence>
+        {showPostCallFeedback && role === 'customer' && (
+          <motion.div
+            className="fixed inset-0 z-50 bg-zinc-950/70 backdrop-blur-sm flex items-end sm:items-center justify-center p-3 sm:p-6"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+          >
+            <motion.div
+              initial={{ y: 28, opacity: 0, scale: 0.98 }}
+              animate={{ y: 0, opacity: 1, scale: 1 }}
+              exit={{ y: 24, opacity: 0, scale: 0.98 }}
+              className="w-full max-w-lg bg-white rounded-t-3xl sm:rounded-3xl border border-zinc-200 shadow-2xl overflow-hidden"
+            >
+              <div className="p-5 sm:p-6 border-b border-zinc-100 flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-[10px] font-black uppercase tracking-[0.22em] text-red-600">Call Complete</p>
+                  <h3 className="text-xl font-black text-zinc-950 mt-1">How was your Zara experience?</h3>
+                  <p className="text-xs text-zinc-500 mt-1">
+                    Your review helps the restaurant owner see call quality and the related customer record.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowPostCallFeedback(false);
+                    setPostCallContext(null);
+                  }}
+                  className="p-2 rounded-xl bg-zinc-50 hover:bg-zinc-100 text-zinc-500 transition-colors"
+                  aria-label="Skip feedback"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {postCallContext?.conversation_id && (
+                <div className="mx-5 sm:mx-6 mt-4 bg-zinc-50 border border-zinc-150 rounded-2xl p-3 text-[10px] text-zinc-500">
+                  <span className="font-black text-zinc-700">Call ID:</span> {postCallContext.conversation_id}
+                </div>
+              )}
+
+              <form onSubmit={handleFeedbackSubmit} className="p-5 sm:p-6 space-y-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-[10px] font-black uppercase text-zinc-400 block mb-1.5">Name</label>
+                    <input
+                      type="text"
+                      required
+                      value={fbName}
+                      onChange={e => setFbName(e.target.value)}
+                      placeholder="Your name"
+                      className="w-full bg-zinc-50 border border-zinc-200 rounded-xl px-3 py-2.5 text-sm text-zinc-800 focus:outline-none focus:bg-white focus:ring-1 focus:ring-red-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-black uppercase text-zinc-400 block mb-1.5">Phone</label>
+                    <input
+                      type="tel"
+                      value={fbPhone}
+                      onChange={e => setFbPhone(e.target.value)}
+                      placeholder="Phone used for order"
+                      className="w-full bg-zinc-50 border border-zinc-200 rounded-xl px-3 py-2.5 text-sm text-zinc-800 focus:outline-none focus:bg-white focus:ring-1 focus:ring-red-500"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-black uppercase text-zinc-400 block mb-1.5">Email</label>
+                  <input
+                    type="email"
+                    value={fbEmail}
+                    onChange={e => setFbEmail(e.target.value)}
+                    placeholder="Email used for confirmation"
+                    className="w-full bg-zinc-50 border border-zinc-200 rounded-xl px-3 py-2.5 text-sm text-zinc-800 focus:outline-none focus:bg-white focus:ring-1 focus:ring-red-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-black uppercase text-zinc-400 block mb-1.5">Rating</label>
+                  <div className="flex gap-2">
+                    {[1, 2, 3, 4, 5].map((star) => (
+                      <button
+                        key={star}
+                        type="button"
+                        onClick={() => setFbRating(star)}
+                        className="focus:outline-none cursor-pointer"
+                      >
+                        <Star className={`w-7 h-7 ${fbRating >= star ? 'text-amber-500 fill-amber-500' : 'text-zinc-200'}`} />
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-black uppercase text-zinc-400 block mb-1.5">Feedback</label>
+                  <textarea
+                    required
+                    value={fbComment}
+                    onChange={e => setFbComment(e.target.value)}
+                    placeholder="Tell us what went well or what should improve..."
+                    rows={4}
+                    className="w-full bg-zinc-50 border border-zinc-200 rounded-xl px-3 py-2.5 text-sm text-zinc-800 focus:outline-none focus:bg-white focus:ring-1 focus:ring-red-500 resize-none"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-3 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowPostCallFeedback(false);
+                      setPostCallContext(null);
+                    }}
+                    className="bg-zinc-100 hover:bg-zinc-200 text-zinc-700 font-bold py-3 rounded-xl text-xs transition-colors"
+                  >
+                    Skip
+                  </button>
+                  <button
+                    type="submit"
+                    className="bg-red-600 hover:bg-red-700 text-white font-bold py-3 rounded-xl text-xs shadow-lg shadow-red-600/15 transition-colors"
+                  >
+                    Submit Feedback
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* 5. Record Slide-over Detail Drawer */}
       <RecordDetailDrawer

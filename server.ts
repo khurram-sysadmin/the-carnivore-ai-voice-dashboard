@@ -216,14 +216,9 @@ let localReservations = [
 
 let localEvents: any[] = [];
 
-let localFeedback = [
-  { id: "fb-1", customer_name: "Robert Evans", customer_phone: "+15557771111", customer_email: "robert@example.com", rating: 5, comment: "Amazing camel meat! Highly recommended. Zara voice agent was super smooth.", status: "NEW", created_at: new Date(Date.now() - 60 * 60 * 1000).toISOString() },
-  { id: "fb-2", customer_name: "Sarah Jenkins", customer_phone: "+15559876543", customer_email: "sarah@example.com", rating: 4, comment: "The beef brisket was outstanding, very juicy. Will order again.", status: "REVIEWED", created_at: new Date(Date.now() - 180 * 60 * 1000).toISOString() }
-];
+let localFeedback: any[] = [];
 
-let localEscalations = [
-  { id: "esc-1", customer_name: "Marcus Aurelius", customer_phone: "+15550007777", customer_email: "marcus@rome.com", reason: "Allergy question: Camel meat preparation cross-contamination risk", transcript: "Zara: Hi Marcus, how can I help? Marcus: I need to know if the camel meat is cut with the same knives as poultry. I have severe allergies. Zara: Let me connect you with a manager right away.", status: "PENDING", created_at: new Date(Date.now() - 15 * 60 * 1000).toISOString(), updated_at: new Date(Date.now() - 15 * 60 * 1000).toISOString() }
-];
+let localEscalations: any[] = [];
 
 let localCallLogs = [
   {
@@ -369,7 +364,7 @@ async function seedSupabaseDatabase() {
     // 3. Seed Feedback
     if (!missingTables.has("feedback")) {
       const { data: existingFeedback, error: fetchFbErr } = await supabase.from("feedback").select("id", { count: "exact", head: true });
-      if (!fetchFbErr && existingFeedback && existingFeedback.length === 0) {
+      if (!fetchFbErr && existingFeedback && existingFeedback.length === 0 && localFeedback.length > 0) {
         console.log("Seeding initial feedback into Supabase...");
         const fbToInsert = localFeedback.map(f => ({
           customer_name: f.customer_name,
@@ -392,7 +387,7 @@ async function seedSupabaseDatabase() {
     // 4. Seed Escalations
     if (!missingTables.has("escalations")) {
       const { data: existingEsc, error: fetchEscErr } = await supabase.from("escalations").select("id", { count: "exact", head: true });
-      if (!fetchEscErr && existingEsc && existingEsc.length === 0) {
+      if (!fetchEscErr && existingEsc && existingEsc.length === 0 && localEscalations.length > 0) {
         console.log("Seeding initial escalations into Supabase...");
         const escToInsert = localEscalations.map(e => ({
           customer_name: e.customer_name,
@@ -1183,6 +1178,77 @@ const reservationSortValue = (reservation: any) => {
   return Number.isFinite(value) ? value : 0;
 };
 
+const normalizePhoneKey = (value?: string) => String(value || "").replace(/[^\d+]/g, "");
+const normalizeEmailKey = (value?: string) => String(value || "").trim().toLowerCase();
+
+const contactMatches = (feedback: any, record: any) => {
+  const fbPhone = normalizePhoneKey(feedback.customer_phone);
+  const recordPhone = normalizePhoneKey(record.customer_phone);
+  const fbEmail = normalizeEmailKey(feedback.customer_email);
+  const recordEmail = normalizeEmailKey(record.customer_email);
+
+  return (
+    (fbPhone && recordPhone && fbPhone === recordPhone) ||
+    (fbEmail && recordEmail && fbEmail === recordEmail)
+  );
+};
+
+const isDemoFeedback = (feedback: any) => {
+  const name = normalizeEmailKey(feedback.customer_name);
+  const email = normalizeEmailKey(feedback.customer_email);
+  const comment = normalizeEmailKey(feedback.comment);
+  return (
+    name === "robert evans" ||
+    name === "sarah jenkins" ||
+    email === "robert@example.com" ||
+    email === "sarah@example.com" ||
+    comment.includes("amazing camel meat") ||
+    comment.includes("beef brisket was outstanding")
+  );
+};
+
+const isDemoEscalation = (escalation: any) => {
+  const name = normalizeEmailKey(escalation.customer_name);
+  const email = normalizeEmailKey(escalation.customer_email);
+  const reason = normalizeEmailKey(escalation.reason);
+  return (
+    name === "marcus aurelius" ||
+    email === "marcus@rome.com" ||
+    reason.includes("cross-contamination risk")
+  );
+};
+
+const enrichFeedbackWithRecords = (feedbackRows: any[], ordersRows: any[], reservationRows: any[]) => {
+  const ordersSorted = [...ordersRows]
+    .map(sanitizeOrder)
+    .sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
+
+  const reservationsSorted = [...reservationRows]
+    .map(normalizeReservation)
+    .sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
+
+  return feedbackRows
+    .filter(f => !isDemoFeedback(f))
+    .map(feedback => {
+      const latestOrder = ordersSorted.find(order => contactMatches(feedback, order));
+      const latestReservation = reservationsSorted.find(reservation => contactMatches(feedback, reservation));
+
+      return {
+        ...feedback,
+        latest_order_number: latestOrder?.order_number,
+        latest_order_summary: latestOrder?.items_summary || (Array.isArray(latestOrder?.items)
+          ? latestOrder.items.map((item: any) => `${item.quantity || 1}x ${item.item_name}`).join(", ")
+          : undefined),
+        latest_order_total: latestOrder ? Number(latestOrder.total_amount || 0) : undefined,
+        latest_reservation_number: latestReservation?.reservation_number,
+        latest_reservation_details: latestReservation
+          ? `${latestReservation.reservation_date} ${latestReservation.reservation_time} for ${latestReservation.party_size} guests`
+          : undefined,
+        matched_record_type: latestOrder ? "order" : latestReservation ? "reservation" : "none"
+      };
+    });
+};
+
 // 2.9 Customer-facing lookups (Public but strictly filtered)
 app.get("/api/customer/orders", async (req, res) => {
   const { phone, email, order_number } = req.query;
@@ -1572,29 +1638,46 @@ app.put("/api/reservations/:id", requireOwnerAuth, async (req, res) => {
 app.get("/api/feedback", requireOwnerAuth, async (req, res) => {
   if (supabase && !missingTables.has("feedback")) {
     const { data, error } = await supabase.from("feedback").select("*").order("created_at", { ascending: false });
-    if (!error && data) return res.json(data);
+    if (!error && data) {
+      let ordersForContext: any[] = [];
+      let reservationsForContext: any[] = [];
+
+      if (!missingTables.has("orders")) {
+        const { data: orderData } = await supabase.from("orders").select("*").order("created_at", { ascending: false }).limit(250);
+        ordersForContext = orderData || [];
+      }
+
+      if (!missingTables.has("reservations")) {
+        const { data: reservationData } = await supabase.from("reservations").select("*").order("created_at", { ascending: false }).limit(250);
+        reservationsForContext = reservationData || [];
+      }
+
+      return res.json(enrichFeedbackWithRecords(data, ordersForContext, reservationsForContext));
+    }
     handleSupabaseError("feedback", error, "fetch");
   }
-  res.json(localFeedback);
+  res.json(enrichFeedbackWithRecords(localFeedback, localOrders, localReservations));
 });
 
 app.post("/api/feedback", async (req, res) => {
+  const customerPhone = req.body.customer_phone || "Not provided";
+  const customerEmail = req.body.customer_email || "feedback@thecarnivore.local";
   const newFb = {
     id: `fb-${Date.now()}`,
     status: "NEW",
     created_at: new Date().toISOString(),
-    customer_name: req.body.customer_name,
-    customer_phone: req.body.customer_phone || null,
-    customer_email: req.body.customer_email || null,
+    customer_name: req.body.customer_name || "Customer",
+    customer_phone: customerPhone,
+    customer_email: customerEmail,
     rating: Number(req.body.rating || 5),
     comment: req.body.comment
   };
 
   if (supabase && !missingTables.has("feedback")) {
     const { data, error } = await supabase.from("feedback").insert([{
-      customer_name: req.body.customer_name,
-      customer_phone: req.body.customer_phone || null,
-      customer_email: req.body.customer_email || null,
+      customer_name: newFb.customer_name,
+      customer_phone: customerPhone,
+      customer_email: customerEmail,
       rating: Number(req.body.rating || 5),
       comment: req.body.comment,
       status: "NEW"
@@ -1623,28 +1706,36 @@ app.post("/api/feedback", async (req, res) => {
 app.get("/api/escalations", requireOwnerAuth, async (req, res) => {
   if (supabase && !missingTables.has("escalations")) {
     const { data, error } = await supabase.from("escalations").select("*").order("created_at", { ascending: false });
-    if (!error && data) return res.json(data);
+    if (!error && data) return res.json(data.filter((esc: any) => !isDemoEscalation(esc)));
     handleSupabaseError("escalations", error, "fetch");
   }
-  res.json(localEscalations);
+  res.json(localEscalations.filter((esc: any) => !isDemoEscalation(esc)));
 });
 
 app.post("/api/escalations", async (req, res) => {
+  const customerName = req.body.customer_name || req.body.caller_name || "Unknown caller";
+  const customerPhone = req.body.customer_phone || req.body.caller_phone || "Unknown phone";
+  const customerEmail = req.body.customer_email || "unknown@thecarnivore.local";
+  const reason = req.body.reason || req.body.modification_details || req.body.faq_question || req.body.transcript || "Human callback requested";
   const newEsc = {
     id: `esc-${Date.now()}`,
     status: "PENDING",
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
-    ...req.body
+    customer_name: customerName,
+    customer_phone: customerPhone,
+    customer_email: customerEmail,
+    reason,
+    transcript: req.body.transcript || ""
   };
 
   if (supabase && !missingTables.has("escalations")) {
     const { data, error } = await supabase.from("escalations").insert([{
-      customer_name: req.body.customer_name,
-      customer_phone: req.body.customer_phone,
-      customer_email: req.body.customer_email,
-      reason: req.body.reason,
-      transcript: req.body.transcript,
+      customer_name: customerName,
+      customer_phone: customerPhone,
+      customer_email: customerEmail,
+      reason,
+      transcript: req.body.transcript || "",
       status: "PENDING"
     }]).select();
     if (!error && data) return res.status(201).json(data[0]);

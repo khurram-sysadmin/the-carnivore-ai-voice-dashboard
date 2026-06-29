@@ -4,7 +4,7 @@ import { Phone, PhoneOff, Sparkles, RefreshCw, CheckCircle2, AlertCircle, Volume
 import { useConversation } from '@elevenlabs/react';
 
 interface CallZaraWidgetProps {
-  onRecordCreated: () => void;
+  onRecordCreated: (record?: any) => void;
   preSelectedAction?: string;
   onClearAction?: () => void;
 }
@@ -287,7 +287,8 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             customer_name: 'Voice Caller',
-            customer_phone: 'Active Live Session',
+            customer_phone: typedDetails.phone.trim() || 'Active Live Session',
+            customer_email: typedDetails.email.trim(),
             duration_seconds: duration,
             transcript: transcriptRef.current.map(t => `${t.speaker}: ${t.text}`).join('\n'),
             status: 'COMPLETED',
@@ -296,16 +297,30 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
             source: 'dashboard'
           })
         })
-        .then(() => {
+        .then(r => r.json())
+        .then((savedLog) => {
           console.log("Call log saved successfully.");
-          onRecordCreated();
+          onRecordCreated({
+            ...savedLog,
+            customer_phone: typedDetails.phone.trim(),
+            customer_email: typedDetails.email.trim(),
+            conversation_id: conversationIdRef.current
+          });
         })
         .catch(err => {
           console.error("Failed to save call log:", err);
-          onRecordCreated();
+          onRecordCreated({
+            customer_phone: typedDetails.phone.trim(),
+            customer_email: typedDetails.email.trim(),
+            conversation_id: conversationIdRef.current
+          });
         });
       } else {
-        onRecordCreated();
+        onRecordCreated({
+          customer_phone: typedDetails.phone.trim(),
+          customer_email: typedDetails.email.trim(),
+          conversation_id: conversationIdRef.current
+        });
       }
 
       sessionModeRef.current = null;
@@ -432,7 +447,7 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
 
       if (part.type === 'stop') {
         setChatLoading(false);
-        window.setTimeout(onRecordCreated, 1000);
+        window.setTimeout(() => onRecordCreated({ source: 'chat' }), 1000);
       }
     }
   });
@@ -535,6 +550,8 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
     setCallState({ status: 'connecting', message: 'Preparing Zara voice session...' });
     setTranscript([]);
     setDetailsSent(false);
+    setDetailsFormVisible(false);
+    setTypedDetails({ phone: '', email: '' });
     conversationIdRef.current = '';
     sessionAgentIdRef.current = '';
     callStartTime.current = null;
@@ -604,51 +621,15 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
 
   // Human escalation trigger
   const handleHumanEscalation = () => {
-    const currentTranscript = transcriptRef.current;
-    const duration = callStartTime.current ? Math.round((Date.now() - callStartTime.current) / 1000) : 0;
-    
-    isCallLogSaved.current = true; // prevent standard onDisconnect saving again
+    if (conversation.status !== 'connected' || sessionModeRef.current !== 'voice') return;
 
-    // Notify server of escalation
-    fetch('/api/escalations', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        customer_name: 'Voice caller',
-        customer_phone: 'Active Live Session',
-        customer_email: 'live-call@thecarnivore.com',
-        reason: 'Customer requested human manager during ElevenLabs call',
-        transcript: currentTranscript.map(t => `${t.speaker}: ${t.text}`).join('\n')
-      })
-    })
-    .then(() => {
-      console.log("Escalation logged.");
-      
-      // Also save call log with status 'ESCALATED'
-      return fetch('/api/call-logs', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          customer_name: 'Voice Caller',
-          customer_phone: 'Active Live Session',
-          duration_seconds: duration,
-          transcript: currentTranscript.map(t => `${t.speaker}: ${t.text}`).join('\n'),
-          status: 'ESCALATED',
-          conversation_id: conversationIdRef.current,
-          agent_id: sessionAgentIdRef.current,
-          source: 'dashboard'
-        })
-      });
-    })
-    .then(() => {
-      console.log("Escalated call log saved.");
-      handleEndCall();
-      onRecordCreated();
-    })
-    .catch(err => {
-      console.error("Failed to log escalation:", err);
-      handleEndCall();
-    });
+    const requestText = 'I want to speak to a manager.';
+    try {
+      conversation.sendUserMessage(requestText);
+      setTranscript(prev => [...prev, { speaker: 'You', text: requestText }]);
+    } catch (err) {
+      console.error("Failed to send escalation request to Zara:", err);
+    }
   };
 
   const handleTypedDetailsSubmit = (e: React.FormEvent) => {
@@ -1023,8 +1004,8 @@ return (
                   onClick={handleHumanEscalation}
                   className="text-xs text-red-400 hover:text-red-300 font-medium flex items-center gap-1"
                 >
-                  <Mic className="w-3.5 h-3.5 animate-pulse text-red-500" />
-                  Transfer to Manager
+                  <AlertCircle className="w-3.5 h-3.5 animate-pulse text-red-500" />
+                  Request Manager Callback
                 </button>
                 
                 <button
