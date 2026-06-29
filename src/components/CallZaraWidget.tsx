@@ -195,11 +195,12 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
   const [chatLoading, setChatLoading] = useState(false);
   const [chatSessionState, setChatSessionState] = useState<'idle' | 'connecting' | 'connected' | 'failed'>('idle');
   const [typedDetails, setTypedDetails] = useState({
+    name: '',
     phone: '',
     email: ''
   });
   const [detailsFormVisible, setDetailsFormVisible] = useState(false);
-  const [detailsFormMode, setDetailsFormMode] = useState<'contact' | 'phone'>('contact');
+  const [detailsFormMode, setDetailsFormMode] = useState<'contact' | 'callback'>('contact');
   const [detailsSent, setDetailsSent] = useState(false);
   const chatBottomRef = useRef<HTMLDivElement | null>(null);
   
@@ -287,7 +288,7 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            customer_name: 'Voice Caller',
+            customer_name: typedDetails.name.trim() || 'Voice Caller',
             customer_phone: typedDetails.phone.trim() || 'Active Live Session',
             customer_email: typedDetails.email.trim(),
             duration_seconds: duration,
@@ -303,6 +304,7 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
           console.log("Call log saved successfully.");
           onRecordCreated({
             ...savedLog,
+            customer_name: typedDetails.name.trim(),
             customer_phone: typedDetails.phone.trim(),
             customer_email: typedDetails.email.trim(),
             conversation_id: conversationIdRef.current
@@ -311,6 +313,7 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
         .catch(err => {
           console.error("Failed to save call log:", err);
           onRecordCreated({
+            customer_name: typedDetails.name.trim(),
             customer_phone: typedDetails.phone.trim(),
             customer_email: typedDetails.email.trim(),
             conversation_id: conversationIdRef.current
@@ -318,6 +321,7 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
         });
       } else {
         onRecordCreated({
+          customer_name: typedDetails.name.trim(),
           customer_phone: typedDetails.phone.trim(),
           customer_email: typedDetails.email.trim(),
           conversation_id: conversationIdRef.current
@@ -363,12 +367,12 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
             lowerText.includes('complaint') ||
             lowerText.includes('refund') ||
             lowerText.includes('payment issue');
-          const phoneOnlyFormRequest =
-            lowerText.includes('fill your phone number below') ||
-            lowerText.includes('fill the phone number below') ||
-            lowerText.includes('fill phone number below') ||
-            lowerText.includes('type your phone number below') ||
-            lowerText.includes('type the phone number below') ||
+          const callbackFormRequest =
+            lowerText.includes('fill your name and phone number below') ||
+            lowerText.includes('fill the name and phone number below') ||
+            lowerText.includes('fill name and phone number below') ||
+            lowerText.includes('type your name and phone number below') ||
+            lowerText.includes('type the name and phone number below') ||
             (
               isEscalationContext &&
               (lowerText.includes('phone number') || lowerText.includes('contact number') || lowerText.includes('mobile number')) &&
@@ -419,10 +423,10 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
             );
           const asksForContact =
             speaker === 'Zara' &&
-            (phoneOnlyFormRequest || explicitContactFormRequest || contactQuestion);
+            (callbackFormRequest || explicitContactFormRequest || contactQuestion);
 
-          if (asksForContact && (!detailsSent || explicitContactFormRequest || phoneOnlyFormRequest)) {
-            setDetailsFormMode(phoneOnlyFormRequest ? 'phone' : 'contact');
+          if (asksForContact && (!detailsSent || explicitContactFormRequest || callbackFormRequest)) {
+            setDetailsFormMode(callbackFormRequest ? 'callback' : 'contact');
             setDetailsFormVisible(true);
           }
 
@@ -574,7 +578,7 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
     setDetailsSent(false);
     setDetailsFormVisible(false);
     setDetailsFormMode('contact');
-    setTypedDetails({ phone: '', email: '' });
+    setTypedDetails({ name: '', phone: '', email: '' });
     conversationIdRef.current = '';
     sessionAgentIdRef.current = '';
     callStartTime.current = null;
@@ -661,6 +665,7 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
     if (conversation.status !== 'connected' || sessionModeRef.current !== 'voice') return;
 
     const entries = [
+      ...(detailsFormMode === 'callback' ? [['Name', typedDetails.name.trim()]] : []),
       ['Phone', typedDetails.phone.trim()],
       ...(detailsFormMode === 'contact' ? [['Email', typedDetails.email.trim()]] : [])
     ].filter(([, value]) => value);
@@ -668,8 +673,8 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
     if (entries.length === 0) return;
 
     const detailText = entries.map(([label, value]) => `${label}: ${value}`).join('\n');
-    const message = detailsFormMode === 'phone'
-      ? `The customer filled the phone number form below in the dashboard for the manager callback. Use this typed value exactly. Do not ask for email or address for this escalation.\n${detailText}`
+    const message = detailsFormMode === 'callback'
+      ? `The customer filled the manager callback form below in the dashboard. Use these typed values exactly. Do not ask for email or address for this escalation.\n${detailText}`
       : `The customer filled the phone/email form below in the dashboard. Use these typed values exactly. Do not ask the customer to spell them by voice. Read them back and confirm only if needed.\n${detailText}`;
 
     try {
@@ -969,11 +974,11 @@ return (
                   <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1.5 mb-2">
                     <div>
                       <p className="text-xs font-bold text-zinc-200">
-                        {detailsFormMode === 'phone' ? 'Fill phone number below' : 'Fill details below'}
+                        {detailsFormMode === 'callback' ? 'Fill callback details below' : 'Fill details below'}
                       </p>
                       <p className="text-[10px] text-zinc-500">
-                        {detailsFormMode === 'phone'
-                          ? 'Use this for exact manager callback number.'
+                        {detailsFormMode === 'callback'
+                          ? 'Use this for exact manager callback name and number.'
                           : 'Use this for exact phone number and email address.'}
                       </p>
                     </div>
@@ -986,7 +991,18 @@ return (
                     </button>
                   </div>
 
-                  <div className={`grid grid-cols-1 ${detailsFormMode === 'contact' ? 'sm:grid-cols-2' : ''} gap-2`}>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {detailsFormMode === 'callback' && (
+                      <input
+                        value={typedDetails.name}
+                        onChange={e => {
+                          setDetailsSent(false);
+                          setTypedDetails(prev => ({ ...prev, name: e.target.value }));
+                        }}
+                        placeholder="Your name"
+                        className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:ring-1 focus:ring-red-500"
+                      />
+                    )}
                     <input
                       value={typedDetails.phone}
                       onChange={e => {
@@ -1024,7 +1040,7 @@ return (
 
               {!detailsFormVisible && detailsSent && (
                 <p className="text-[10px] font-bold text-emerald-400 text-center">
-                  {detailsFormMode === 'phone' ? 'Phone number sent to Zara.' : 'Phone/email sent to Zara.'}
+                  {detailsFormMode === 'callback' ? 'Callback details sent to Zara.' : 'Phone/email sent to Zara.'}
                 </p>
               )}
 
