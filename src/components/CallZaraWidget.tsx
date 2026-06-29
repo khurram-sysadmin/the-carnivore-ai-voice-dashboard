@@ -199,6 +199,7 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
     email: ''
   });
   const [detailsFormVisible, setDetailsFormVisible] = useState(false);
+  const [detailsFormMode, setDetailsFormMode] = useState<'contact' | 'phone'>('contact');
   const [detailsSent, setDetailsSent] = useState(false);
   const chatBottomRef = useRef<HTMLDivElement | null>(null);
   
@@ -354,6 +355,26 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
           const speaker = msg.source === 'user' ? 'You' : 'Zara';
           const text = formatTranscriptText(msg.message);
           const lowerText = text.toLowerCase();
+          const isEscalationContext =
+            lowerText.includes('manager') ||
+            lowerText.includes('callback') ||
+            lowerText.includes('human') ||
+            lowerText.includes('escalation') ||
+            lowerText.includes('complaint') ||
+            lowerText.includes('refund') ||
+            lowerText.includes('payment issue');
+          const phoneOnlyFormRequest =
+            lowerText.includes('fill your phone number below') ||
+            lowerText.includes('fill the phone number below') ||
+            lowerText.includes('fill phone number below') ||
+            lowerText.includes('type your phone number below') ||
+            lowerText.includes('type the phone number below') ||
+            (
+              isEscalationContext &&
+              (lowerText.includes('phone number') || lowerText.includes('contact number') || lowerText.includes('mobile number')) &&
+              !lowerText.includes('email') &&
+              !lowerText.includes('mail')
+            );
           const explicitContactFormRequest =
             lowerText.includes('fill the details below') ||
             lowerText.includes('details below') ||
@@ -398,9 +419,10 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
             );
           const asksForContact =
             speaker === 'Zara' &&
-            (explicitContactFormRequest || contactQuestion);
+            (phoneOnlyFormRequest || explicitContactFormRequest || contactQuestion);
 
-          if (asksForContact && (!detailsSent || explicitContactFormRequest)) {
+          if (asksForContact && (!detailsSent || explicitContactFormRequest || phoneOnlyFormRequest)) {
+            setDetailsFormMode(phoneOnlyFormRequest ? 'phone' : 'contact');
             setDetailsFormVisible(true);
           }
 
@@ -551,6 +573,7 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
     setTranscript([]);
     setDetailsSent(false);
     setDetailsFormVisible(false);
+    setDetailsFormMode('contact');
     setTypedDetails({ phone: '', email: '' });
     conversationIdRef.current = '';
     sessionAgentIdRef.current = '';
@@ -639,13 +662,15 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
 
     const entries = [
       ['Phone', typedDetails.phone.trim()],
-      ['Email', typedDetails.email.trim()]
+      ...(detailsFormMode === 'contact' ? [['Email', typedDetails.email.trim()]] : [])
     ].filter(([, value]) => value);
 
     if (entries.length === 0) return;
 
     const detailText = entries.map(([label, value]) => `${label}: ${value}`).join('\n');
-    const message = `The customer filled the phone/email form below in the dashboard. Use these typed values exactly. Do not ask the customer to spell them by voice. Read them back and confirm only if needed.\n${detailText}`;
+    const message = detailsFormMode === 'phone'
+      ? `The customer filled the phone number form below in the dashboard for the manager callback. Use this typed value exactly. Do not ask for email or address for this escalation.\n${detailText}`
+      : `The customer filled the phone/email form below in the dashboard. Use these typed values exactly. Do not ask the customer to spell them by voice. Read them back and confirm only if needed.\n${detailText}`;
 
     try {
       conversation.sendUserMessage(message);
@@ -943,8 +968,14 @@ return (
                 <form onSubmit={handleTypedDetailsSubmit} className="bg-zinc-950/80 border border-red-900/60 rounded-xl p-3 shadow-lg shadow-red-950/20">
                   <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1.5 mb-2">
                     <div>
-                      <p className="text-xs font-bold text-zinc-200">Fill details below</p>
-                      <p className="text-[10px] text-zinc-500">Use this for exact phone number and email address.</p>
+                      <p className="text-xs font-bold text-zinc-200">
+                        {detailsFormMode === 'phone' ? 'Fill phone number below' : 'Fill details below'}
+                      </p>
+                      <p className="text-[10px] text-zinc-500">
+                        {detailsFormMode === 'phone'
+                          ? 'Use this for exact manager callback number.'
+                          : 'Use this for exact phone number and email address.'}
+                      </p>
                     </div>
                     <button
                       type="button"
@@ -955,7 +986,7 @@ return (
                     </button>
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <div className={`grid grid-cols-1 ${detailsFormMode === 'contact' ? 'sm:grid-cols-2' : ''} gap-2`}>
                     <input
                       value={typedDetails.phone}
                       onChange={e => {
@@ -966,17 +997,19 @@ return (
                       inputMode="tel"
                       className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:ring-1 focus:ring-red-500"
                     />
-                    <input
-                      value={typedDetails.email}
-                      onChange={e => {
-                        setDetailsSent(false);
-                        setTypedDetails(prev => ({ ...prev, email: e.target.value }));
-                      }}
-                      placeholder="Email address"
-                      type="email"
-                      inputMode="email"
-                      className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:ring-1 focus:ring-red-500"
-                    />
+                    {detailsFormMode === 'contact' && (
+                      <input
+                        value={typedDetails.email}
+                        onChange={e => {
+                          setDetailsSent(false);
+                          setTypedDetails(prev => ({ ...prev, email: e.target.value }));
+                        }}
+                        placeholder="Email address"
+                        type="email"
+                        inputMode="email"
+                        className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:ring-1 focus:ring-red-500"
+                      />
+                    )}
                   </div>
 
                   <button
@@ -990,7 +1023,9 @@ return (
               )}
 
               {!detailsFormVisible && detailsSent && (
-                <p className="text-[10px] font-bold text-emerald-400 text-center">Phone/email sent to Zara.</p>
+                <p className="text-[10px] font-bold text-emerald-400 text-center">
+                  {detailsFormMode === 'phone' ? 'Phone number sent to Zara.' : 'Phone/email sent to Zara.'}
+                </p>
               )}
 
               {/* Muted alert */}
