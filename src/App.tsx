@@ -2325,8 +2325,13 @@ export default function App() {
                               <p className="font-black uppercase tracking-wide">Related reservation {fb.latest_reservation_number}</p>
                               <p className="font-semibold">{fb.latest_reservation_details}</p>
                             </div>
+                          ) : fb.conversation_id || fb.call_log_id ? (
+                            <div className="mt-3 bg-zinc-50 border border-zinc-100 rounded-xl p-3 text-[11px] text-zinc-600 space-y-1">
+                              <p className="font-black uppercase tracking-wide text-zinc-500">Standalone call feedback</p>
+                              <p className="font-semibold">Captured from this customer call, with no order or reservation attached.</p>
+                            </div>
                           ) : (
-                            <p className="mt-3 text-[10px] font-semibold text-zinc-400">No matching order or reservation found yet.</p>
+                            <p className="mt-3 text-[10px] font-semibold text-zinc-400">Standalone feedback with no order or reservation attached.</p>
                           )}
                         </div>
                       ))}

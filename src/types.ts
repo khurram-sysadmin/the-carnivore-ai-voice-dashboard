@@ -83,6 +83,12 @@ export interface FeedbackItem {
   comment: string;
   status: 'NEW' | 'REVIEWED' | 'ARCHIVED';
   created_at: string;
+  conversation_id?: string;
+  call_log_id?: string;
+  order_id?: string;
+  order_number?: string;
+  reservation_id?: string;
+  reservation_number?: string;
   latest_order_number?: string;
   latest_order_summary?: string;
   latest_order_total?: number;

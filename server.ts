@@ -1210,18 +1210,7 @@ const reservationSortValue = (reservation: any) => {
 
 const normalizePhoneKey = (value?: string) => String(value || "").replace(/[^\d+]/g, "");
 const normalizeEmailKey = (value?: string) => String(value || "").trim().toLowerCase();
-
-const contactMatches = (feedback: any, record: any) => {
-  const fbPhone = normalizePhoneKey(feedback.customer_phone);
-  const recordPhone = normalizePhoneKey(record.customer_phone);
-  const fbEmail = normalizeEmailKey(feedback.customer_email);
-  const recordEmail = normalizeEmailKey(record.customer_email);
-
-  return (
-    (fbPhone && recordPhone && fbPhone === recordPhone) ||
-    (fbEmail && recordEmail && fbEmail === recordEmail)
-  );
-};
+const normalizeRecordKey = (value?: string) => String(value || "").trim().toLowerCase();
 
 const isDemoFeedback = (feedback: any) => {
   const name = normalizeEmailKey(feedback.customer_name);
@@ -1334,6 +1323,12 @@ const normalizeFeedbackRecord = (feedback: any) => ({
   rating: Number(feedback.rating || feedback.stars || 5),
   comment: feedback.comment || feedback.feedback || feedback.message || "",
   status: feedback.status || "NEW",
+  conversation_id: feedback.conversation_id || feedback.conversationId || "",
+  call_log_id: feedback.call_log_id || feedback.callLogId || "",
+  order_id: feedback.order_id || "",
+  order_number: feedback.order_number || "",
+  reservation_id: feedback.reservation_id || "",
+  reservation_number: feedback.reservation_number || "",
   created_at: feedback.created_at || new Date().toISOString()
 });
 
@@ -1345,6 +1340,8 @@ const feedbackFromCallLog = (log: DashboardCallLog) => normalizeFeedbackRecord({
   rating: inferFeedbackRating(log.transcript),
   comment: extractFeedbackComment(log.transcript, log.transcript_summary || "Feedback captured from call transcript"),
   status: "NEW",
+  conversation_id: log.conversation_id || "",
+  call_log_id: log.id || "",
   created_at: log.created_at
 });
 
@@ -1441,6 +1438,12 @@ const feedbackInsertVariants = (feedback: any) => [
     rating: feedback.rating,
     comment: feedback.comment,
     status: feedback.status,
+    conversation_id: feedback.conversation_id,
+    call_log_id: feedback.call_log_id,
+    order_id: feedback.order_id,
+    order_number: feedback.order_number,
+    reservation_id: feedback.reservation_id,
+    reservation_number: feedback.reservation_number,
     created_at: feedback.created_at
   },
   {
@@ -1472,34 +1475,61 @@ const feedbackInsertVariants = (feedback: any) => [
   }
 ];
 
-const enrichFeedbackWithRecords = (feedbackRows: any[], ordersRows: any[], reservationRows: any[]) => {
-  const ordersSorted = [...ordersRows]
-    .map(sanitizeOrder)
-    .sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
+const findExplicitOrderForFeedback = (feedback: any, ordersRows: any[]) => {
+  const orderId = normalizeRecordKey(feedback.order_id);
+  const orderNumber = normalizeRecordKey(feedback.order_number);
+  if (!orderId && !orderNumber) return undefined;
 
-  const reservationsSorted = [...reservationRows]
-    .map(normalizeReservation)
-    .sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
+  return ordersRows.find(order => {
+    const candidateIds = [
+      order.id,
+      order.order_id,
+      order.order_number
+    ].map(normalizeRecordKey);
+    return (orderId && candidateIds.includes(orderId)) || (orderNumber && candidateIds.includes(orderNumber));
+  });
+};
+
+const findExplicitReservationForFeedback = (feedback: any, reservationRows: any[]) => {
+  const reservationId = normalizeRecordKey(feedback.reservation_id);
+  const reservationNumber = normalizeRecordKey(feedback.reservation_number);
+  if (!reservationId && !reservationNumber) return undefined;
+
+  return reservationRows.find(reservation => {
+    const candidateIds = [
+      reservation.id,
+      reservation.reservation_id,
+      reservation.booking_id,
+      reservation.reservation_number,
+      reservation.booking_number
+    ].map(normalizeRecordKey);
+    return (reservationId && candidateIds.includes(reservationId)) || (reservationNumber && candidateIds.includes(reservationNumber));
+  });
+};
+
+const enrichFeedbackWithRecords = (feedbackRows: any[], ordersRows: any[], reservationRows: any[]) => {
+  const normalizedOrders = [...ordersRows].map(sanitizeOrder);
+  const normalizedReservations = [...reservationRows].map(normalizeReservation);
 
   return feedbackRows
     .map(normalizeFeedbackRecord)
     .filter(f => !isDemoFeedback(f))
     .map(feedback => {
-      const latestOrder = ordersSorted.find(order => contactMatches(feedback, order));
-      const latestReservation = reservationsSorted.find(reservation => contactMatches(feedback, reservation));
+      const linkedOrder = findExplicitOrderForFeedback(feedback, normalizedOrders);
+      const linkedReservation = findExplicitReservationForFeedback(feedback, normalizedReservations);
 
       return {
         ...feedback,
-        latest_order_number: latestOrder?.order_number,
-        latest_order_summary: latestOrder?.items_summary || (Array.isArray(latestOrder?.items)
-          ? latestOrder.items.map((item: any) => `${item.quantity || 1}x ${item.item_name}`).join(", ")
+        latest_order_number: linkedOrder?.order_number,
+        latest_order_summary: linkedOrder?.items_summary || (Array.isArray(linkedOrder?.items)
+          ? linkedOrder.items.map((item: any) => `${item.quantity || 1}x ${item.item_name}`).join(", ")
           : undefined),
-        latest_order_total: latestOrder ? Number(latestOrder.total_amount || 0) : undefined,
-        latest_reservation_number: latestReservation?.reservation_number,
-        latest_reservation_details: latestReservation
-          ? `${latestReservation.reservation_date} ${latestReservation.reservation_time} for ${latestReservation.party_size} guests`
+        latest_order_total: linkedOrder ? Number(linkedOrder.total_amount || 0) : undefined,
+        latest_reservation_number: linkedReservation?.reservation_number,
+        latest_reservation_details: linkedReservation
+          ? `${linkedReservation.reservation_date} ${linkedReservation.reservation_time} for ${linkedReservation.party_size} guests`
           : undefined,
-        matched_record_type: latestOrder ? "order" : latestReservation ? "reservation" : "none"
+        matched_record_type: linkedOrder ? "order" : linkedReservation ? "reservation" : "none"
       };
     });
 };
@@ -2098,7 +2128,13 @@ app.post("/api/feedback", async (req, res) => {
     customer_phone: customerPhone,
     customer_email: customerEmail,
     rating: Number(req.body.rating || 5),
-    comment: req.body.comment
+    comment: req.body.comment,
+    conversation_id: req.body.conversation_id || req.body.conversationId || "",
+    call_log_id: req.body.call_log_id || req.body.callLogId || "",
+    order_id: req.body.order_id || "",
+    order_number: req.body.order_number || "",
+    reservation_id: req.body.reservation_id || "",
+    reservation_number: req.body.reservation_number || ""
   });
 
   if (supabase && !missingTables.has("feedback")) {
