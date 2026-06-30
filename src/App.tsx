@@ -111,6 +111,7 @@ export default function App() {
   const [activityEvents, setActivityEvents] = useState<ActivityEvent[]>([]);
   const [feedback, setFeedback] = useState<FeedbackItem[]>([]);
   const [escalations, setEscalations] = useState<EscalationItem[]>([]);
+  const [updatingEscalationId, setUpdatingEscalationId] = useState<string | null>(null);
   const [callLogs, setCallLogs] = useState<CallLog[]>([]);
 
   // Search & Filter
@@ -538,6 +539,15 @@ export default function App() {
   };
 
   const handleEscalationStatusChange = (id: string, status: EscalationItem['status']) => {
+    const previousEscalations = escalations;
+    const updatedAt = new Date().toISOString();
+
+    setUpdatingEscalationId(id);
+    setEscalations(current => status === 'RESOLVED'
+      ? current.filter(esc => esc.id !== id)
+      : current.map(esc => esc.id === id ? { ...esc, status, updated_at: updatedAt } : esc)
+    );
+
     fetch(`/api/escalations/${encodeURIComponent(id)}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
@@ -550,11 +560,22 @@ export default function App() {
       }
       return r.json();
     })
-    .then(() => {
+    .then((updatedEscalation: EscalationItem) => {
+      setEscalations(current => {
+        if (status === 'RESOLVED') {
+          return current.filter(esc => esc.id !== id);
+        }
+
+        return current.map(esc => esc.id === id ? { ...esc, ...updatedEscalation } : esc);
+      });
       showToast(status === 'RESOLVED' ? 'Escalation marked resolved.' : `Escalation moved to ${status.replace('_', ' ').toLowerCase()}.`);
       loadData();
     })
-    .catch(err => showToast(err.message || 'Failed to update escalation', 'error'));
+    .catch(err => {
+      setEscalations(previousEscalations);
+      showToast(err.message || 'Failed to update escalation', 'error');
+    })
+    .finally(() => setUpdatingEscalationId(null));
   };
 
   // Pre-load Voice context
@@ -620,7 +641,8 @@ export default function App() {
     .reduce((sum, o) => sum + Number(o.total_amount), 0);
 
   const pendingOrders = orders.filter(o => o.status === 'RECEIVED' || o.status === 'PREPARING').length;
-  const pendingEscalations = escalations.filter(e => e.status === 'PENDING');
+  const activeEscalations = escalations.filter(e => e.status !== 'RESOLVED');
+  const pendingEscalations = activeEscalations.filter(e => e.status === 'PENDING');
   const resToday = reservations.filter(r => r.status !== 'CANCELLED' && new Date(r.reservation_date).toDateString() === new Date().toDateString()).length;
   const cancellationsToday = orders.filter(o => o.status === 'CANCELLED' && new Date(o.created_at).toDateString() === new Date().toDateString()).length +
                              reservations.filter(r => r.status === 'CANCELLED' && new Date(r.created_at).toDateString() === new Date().toDateString()).length;
@@ -2189,51 +2211,69 @@ export default function App() {
                     Human Agent Escalations
                   </h3>
                   
-                  {escalations.length === 0 ? (
+                  {activeEscalations.length === 0 ? (
                     <p className="text-xs text-zinc-400 italic py-6 text-center">No active escalations logged.</p>
                   ) : (
                     <div className="space-y-4">
-                      {escalations.map(esc => (
-                        <div key={esc.id} className="border border-zinc-200 rounded-xl p-4 bg-zinc-50/50 space-y-3">
-                          <div className="flex items-center justify-between">
-                            <span className="font-bold text-xs text-zinc-800">{esc.customer_name}</span>
-                            <StatusBadge status={esc.status} />
+                      {activeEscalations.map(esc => {
+                        const isUpdating = updatingEscalationId === esc.id;
+                        const isInProgress = esc.status === 'IN_PROGRESS';
+
+                        return (
+                        <div
+                          key={esc.id}
+                          className={`border rounded-2xl p-4 shadow-sm transition-all duration-200 ${
+                            isInProgress
+                              ? 'border-orange-200 bg-orange-50/40'
+                              : 'border-rose-100 bg-white hover:border-rose-200 hover:shadow-md'
+                          }`}
+                        >
+                          <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+                            <div className="min-w-0 space-y-1">
+                              <span className="block font-black text-sm text-zinc-900 truncate">{esc.customer_name}</span>
+                              <span className="block text-[11px] font-semibold text-zinc-500">{esc.customer_phone}</span>
+                            </div>
+                            <div className="shrink-0">
+                              <StatusBadge status={esc.status} />
+                            </div>
                           </div>
-                          <p className="text-xs font-semibold text-rose-700">Reason: {esc.reason}</p>
+
+                          <div className="mt-3 rounded-xl border border-zinc-100 bg-zinc-50 px-3 py-2">
+                            <p className="text-[10px] font-black uppercase tracking-[0.18em] text-zinc-400">Reason</p>
+                            <p className="mt-1 text-xs font-bold text-rose-700">{esc.reason}</p>
+                          </div>
+
                           {esc.transcript && (
-                            <div className="p-3 bg-zinc-900 text-zinc-300 font-mono text-[10px] rounded-lg max-h-[140px] overflow-y-auto whitespace-pre-wrap">
+                            <div className="mt-3 p-3 bg-zinc-950 text-zinc-200 font-mono text-[10px] rounded-xl max-h-[150px] overflow-y-auto whitespace-pre-wrap border border-zinc-800">
                               {esc.transcript}
                             </div>
                           )}
-                          <div className="flex flex-wrap gap-2">
-                            {esc.status === 'PENDING' && (
-                              <button
-                                onClick={() => handleEscalationStatusChange(esc.id, 'IN_PROGRESS')}
-                                className="px-3 py-1.5 rounded-lg bg-orange-50 text-orange-700 border border-orange-200 text-[10px] font-black uppercase tracking-wide hover:bg-orange-100 transition-colors"
-                              >
-                                Start Handling
-                              </button>
-                            )}
-                            {esc.status !== 'RESOLVED' && (
+
+                          <div className="mt-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                            <span className="text-[10px] font-medium text-zinc-400">{new Date(esc.created_at).toLocaleDateString()} at {new Date(esc.created_at).toLocaleTimeString()}</span>
+                            <div className="flex flex-wrap gap-2 sm:justify-end">
+                              {esc.status === 'PENDING' && (
+                                <button
+                                  onClick={() => handleEscalationStatusChange(esc.id, 'IN_PROGRESS')}
+                                  disabled={isUpdating}
+                                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-orange-50 text-orange-700 border border-orange-200 text-[10px] font-black uppercase tracking-wide hover:bg-orange-100 disabled:opacity-50 disabled:cursor-wait transition-colors"
+                                >
+                                  <Clock className="w-3 h-3" />
+                                  Start Handling
+                                </button>
+                              )}
                               <button
                                 onClick={() => handleEscalationStatusChange(esc.id, 'RESOLVED')}
-                                className="px-3 py-1.5 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-black uppercase tracking-wide hover:bg-emerald-100 transition-colors"
+                                disabled={isUpdating}
+                                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-black uppercase tracking-wide hover:bg-emerald-100 disabled:opacity-50 disabled:cursor-wait transition-colors"
                               >
+                                <CheckCircle2 className="w-3 h-3" />
                                 Mark Resolved
                               </button>
-                            )}
-                            {esc.status === 'RESOLVED' && (
-                              <button
-                                onClick={() => handleEscalationStatusChange(esc.id, 'PENDING')}
-                                className="px-3 py-1.5 rounded-lg bg-zinc-50 text-zinc-700 border border-zinc-200 text-[10px] font-black uppercase tracking-wide hover:bg-zinc-100 transition-colors"
-                              >
-                                Reopen
-                              </button>
-                            )}
+                            </div>
                           </div>
-                          <span className="text-[9px] text-zinc-400 block">{new Date(esc.created_at).toLocaleDateString()} at {new Date(esc.created_at).toLocaleTimeString()}</span>
                         </div>
-                      ))}
+                      )})}
                     </div>
                   )}
                 </div>

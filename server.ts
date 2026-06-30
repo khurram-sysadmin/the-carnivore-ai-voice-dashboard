@@ -1348,6 +1348,11 @@ const feedbackFromCallLog = (log: DashboardCallLog) => normalizeFeedbackRecord({
   created_at: log.created_at
 });
 
+const normalizeEscalationStatus = (status: any) => {
+  const normalized = String(status || "PENDING").toUpperCase();
+  return ["PENDING", "IN_PROGRESS", "RESOLVED"].includes(normalized) ? normalized : "PENDING";
+};
+
 const normalizeEscalationRecord = (escalation: any) => {
   const transcript = escalation.transcript || escalation.conversation_transcript || "";
   const extractedName = extractTranscriptField(transcript, "Name");
@@ -1361,7 +1366,7 @@ const normalizeEscalationRecord = (escalation: any) => {
     customer_email: escalation.customer_email || escalation.email || "unknown@thecarnivore.local",
     reason: escalation.reason || escalation.issue || escalation.query || escalation.modification_details || escalation.faq_question || inferEscalationReason(transcript),
     transcript,
-    status: escalation.status || "PENDING",
+    status: normalizeEscalationStatus(escalation.status),
     created_at: escalation.created_at || new Date().toISOString(),
     updated_at: escalation.updated_at || escalation.created_at || new Date().toISOString()
   };
@@ -1511,6 +1516,34 @@ const escalationPersistenceKey = (escalation: any) => [
   recordDateKey(escalation.created_at),
   recordTextKey(escalation.transcript || escalation.reason)
 ].join("|");
+
+const escalationStatusPriority = (status: any) => {
+  const normalized = normalizeEscalationStatus(status);
+  if (normalized === "RESOLVED") return 3;
+  if (normalized === "IN_PROGRESS") return 2;
+  return 1;
+};
+
+const dedupeEscalationRecords = (escalationRows: any[]) => {
+  const seen = new Set<string>();
+
+  return escalationRows
+    .map(normalizeEscalationRecord)
+    .filter((esc: any) => !isDemoEscalation(esc))
+    .sort((a: any, b: any) => {
+      const statusDelta = escalationStatusPriority(b.status) - escalationStatusPriority(a.status);
+      if (statusDelta !== 0) return statusDelta;
+      return new Date(b.updated_at || b.created_at || 0).getTime() - new Date(a.updated_at || a.created_at || 0).getTime();
+    })
+    .filter((esc: any) => {
+      const key = escalationPersistenceKey(esc);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .filter((esc: any) => normalizeEscalationStatus(esc.status) !== "RESOLVED")
+    .sort((a: any, b: any) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
+};
 
 const persistFeedbackRowsToSupabase = async (derivedRows: any[], existingRows: any[]) => {
   if (!supabase || missingTables.has("feedback") || derivedRows.length === 0) {
@@ -2114,16 +2147,7 @@ app.get("/api/escalations", requireOwnerAuth, async (req, res) => {
     normalizedEscalations = localEscalations.map(normalizeEscalationRecord);
   }
 
-  const seen = new Set<string>();
-  const deduped = normalizedEscalations
-    .filter((esc: any) => !isDemoEscalation(esc))
-    .filter((esc: any) => {
-      const key = `${normalizePhoneKey(esc.customer_phone)}|${String(esc.transcript || esc.reason || "").slice(0, 120)}`;
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    })
-    .sort((a: any, b: any) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
+  const deduped = dedupeEscalationRecords(normalizedEscalations);
 
   res.json(deduped);
 });
