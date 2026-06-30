@@ -1084,7 +1084,7 @@ return (
                   className="text-xs text-red-400 hover:text-red-300 font-medium flex items-center gap-1"
                 >
                   <AlertCircle className="w-3.5 h-3.5 animate-pulse text-red-500" />
-                  Request Manager Callback
+                  Talk to Manager
                 </button>
                 
                 <button
