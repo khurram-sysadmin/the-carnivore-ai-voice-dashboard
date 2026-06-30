@@ -797,22 +797,27 @@ const looksLikeSeedCallLog = (log: any) => {
   );
 };
 
-const normalizeSavedCallLog = (log: any): DashboardCallLog => ({
-  id: String(log.id),
-  conversation_id: log.conversation_id || undefined,
-  agent_id: log.agent_id || undefined,
-  customer_name: log.customer_name || "Voice Caller",
-  customer_phone: log.customer_phone || "Voice Session",
-  duration_seconds: Number(log.duration_seconds || 0),
-  transcript: log.transcript || "",
-  transcript_summary: log.transcript_summary || undefined,
-  audio_url: log.audio_url || undefined,
-  has_audio: Boolean(log.audio_url || log.has_audio),
-  main_language: log.main_language || undefined,
-  source: log.source || (looksLikeSeedCallLog(log) ? "demo" : "dashboard"),
-  status: normalizeCallStatus(log.status),
-  created_at: log.created_at || new Date().toISOString()
-});
+const normalizeSavedCallLog = (log: any): DashboardCallLog => {
+  const transcript = log.transcript || "";
+  const baseStatus = normalizeCallStatus(log.status);
+
+  return {
+    id: String(log.id),
+    conversation_id: log.conversation_id || undefined,
+    agent_id: log.agent_id || undefined,
+    customer_name: log.customer_name || "Voice Caller",
+    customer_phone: log.customer_phone || "Voice Session",
+    duration_seconds: Number(log.duration_seconds || 0),
+    transcript,
+    transcript_summary: log.transcript_summary || undefined,
+    audio_url: log.audio_url || undefined,
+    has_audio: Boolean(log.audio_url || log.has_audio),
+    main_language: log.main_language || undefined,
+    source: log.source || (looksLikeSeedCallLog(log) ? "demo" : "dashboard"),
+    status: baseStatus === "COMPLETED" && transcriptLooksLikeEscalation(transcript) ? "ESCALATED" : baseStatus,
+    created_at: log.created_at || new Date().toISOString()
+  };
+};
 
 const normalizeElevenLabsConversation = (conversation: any, agentId: string): DashboardCallLog | null => {
   const conversationId = conversation?.conversation_id || conversation?.id;
@@ -823,6 +828,8 @@ const normalizeElevenLabsConversation = (conversation: any, agentId: string): Da
     conversation?.status ??
     conversation?.call_successful ??
     conversation?.analysis?.call_successful;
+
+  const baseStatus = normalizeCallStatus(status);
 
   return {
     id: `elevenlabs-${conversationId}`,
@@ -837,7 +844,7 @@ const normalizeElevenLabsConversation = (conversation: any, agentId: string): Da
     has_audio: true,
     main_language: conversation?.main_language ?? conversation?.analysis?.main_language ?? undefined,
     source: "elevenlabs",
-    status: normalizeCallStatus(status),
+    status: baseStatus === "COMPLETED" && transcriptLooksLikeEscalation(transcript) ? "ESCALATED" : baseStatus,
     created_at: readCreatedAt(conversation)
   };
 };
@@ -2181,6 +2188,50 @@ app.post("/api/escalations", async (req, res) => {
   }
 
   res.status(201).json(newEsc);
+});
+
+app.patch("/api/escalations/:id", requireOwnerAuth, async (req, res) => {
+  const status = String(req.body.status || "").toUpperCase();
+  const allowedStatuses = new Set(["PENDING", "IN_PROGRESS", "RESOLVED"]);
+
+  if (!allowedStatuses.has(status)) {
+    return res.status(400).json({ error: "Invalid escalation status. Use PENDING, IN_PROGRESS, or RESOLVED." });
+  }
+
+  const id = req.params.id;
+  const updates = {
+    status,
+    updated_at: new Date().toISOString()
+  };
+
+  const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id);
+
+  if (supabase && !missingTables.has("escalations") && isUuid) {
+    const { data, error } = await supabase
+      .from("escalations")
+      .update(updates)
+      .eq("id", id)
+      .select();
+
+    if (!error && data && data[0]) {
+      return res.json(normalizeEscalationRecord(data[0]));
+    }
+
+    if (error) {
+      handleSupabaseError("escalations", error, "update-status");
+    }
+  }
+
+  const idx = localEscalations.findIndex(e => String(e.id) === id);
+  if (idx !== -1) {
+    localEscalations[idx] = {
+      ...localEscalations[idx],
+      ...updates
+    };
+    return res.json(normalizeEscalationRecord(localEscalations[idx]));
+  }
+
+  return res.status(404).json({ error: "Escalation not found or not yet synced to Supabase. Refresh and try again." });
 });
 
 // 6.5 Call Logs Routing

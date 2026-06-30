@@ -537,6 +537,26 @@ export default function App() {
     });
   };
 
+  const handleEscalationStatusChange = (id: string, status: EscalationItem['status']) => {
+    fetch(`/api/escalations/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status })
+    })
+    .then(async r => {
+      if (!r.ok) {
+        const data = await r.json().catch(() => ({}));
+        throw new Error(data.error || 'Failed to update escalation');
+      }
+      return r.json();
+    })
+    .then(() => {
+      showToast(status === 'RESOLVED' ? 'Escalation marked resolved.' : `Escalation moved to ${status.replace('_', ' ').toLowerCase()}.`);
+      loadData();
+    })
+    .catch(err => showToast(err.message || 'Failed to update escalation', 'error'));
+  };
+
   // Pre-load Voice context
   const handleCallRecordCreated = (record?: any) => {
     loadData();
@@ -2185,6 +2205,32 @@ export default function App() {
                               {esc.transcript}
                             </div>
                           )}
+                          <div className="flex flex-wrap gap-2">
+                            {esc.status === 'PENDING' && (
+                              <button
+                                onClick={() => handleEscalationStatusChange(esc.id, 'IN_PROGRESS')}
+                                className="px-3 py-1.5 rounded-lg bg-orange-50 text-orange-700 border border-orange-200 text-[10px] font-black uppercase tracking-wide hover:bg-orange-100 transition-colors"
+                              >
+                                Start Handling
+                              </button>
+                            )}
+                            {esc.status !== 'RESOLVED' && (
+                              <button
+                                onClick={() => handleEscalationStatusChange(esc.id, 'RESOLVED')}
+                                className="px-3 py-1.5 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-black uppercase tracking-wide hover:bg-emerald-100 transition-colors"
+                              >
+                                Mark Resolved
+                              </button>
+                            )}
+                            {esc.status === 'RESOLVED' && (
+                              <button
+                                onClick={() => handleEscalationStatusChange(esc.id, 'PENDING')}
+                                className="px-3 py-1.5 rounded-lg bg-zinc-50 text-zinc-700 border border-zinc-200 text-[10px] font-black uppercase tracking-wide hover:bg-zinc-100 transition-colors"
+                              >
+                                Reopen
+                              </button>
+                            )}
+                          </div>
                           <span className="text-[9px] text-zinc-400 block">{new Date(esc.created_at).toLocaleDateString()} at {new Date(esc.created_at).toLocaleTimeString()}</span>
                         </div>
                       ))}
