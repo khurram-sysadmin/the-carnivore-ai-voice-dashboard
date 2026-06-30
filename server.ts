@@ -656,6 +656,16 @@ type DashboardCallLog = {
   created_at: string;
 };
 
+let elevenLabsCallLogsCache: {
+  expiresAt: number;
+  limit: number;
+  logs: DashboardCallLog[];
+} = {
+  expiresAt: 0,
+  limit: 0,
+  logs: []
+};
+
 const getElevenLabsConfig = () => {
   const agentId = process.env.ELEVENLABS_AGENT_ID || process.env.VITE_ELEVENLABS_AGENT_ID;
   const apiKey = process.env.ELEVENLABS_API_KEY;
@@ -836,6 +846,11 @@ async function fetchElevenLabsCallLogs(limit = 25): Promise<DashboardCallLog[]> 
   const { agentId, apiKey, configured } = getElevenLabsConfig();
   if (!configured || !agentId || !apiKey) return [];
 
+  const now = Date.now();
+  if (elevenLabsCallLogsCache.expiresAt > now && elevenLabsCallLogsCache.limit >= limit) {
+    return elevenLabsCallLogsCache.logs.slice(0, limit);
+  }
+
   try {
     const listUrl = `https://api.elevenlabs.io/v1/convai/conversations?agent_id=${encodeURIComponent(agentId)}&page_size=${limit}`;
     const listResponse = await fetch(listUrl, {
@@ -871,10 +886,18 @@ async function fetchElevenLabsCallLogs(limit = 25): Promise<DashboardCallLog[]> 
       })
     );
 
-    return details
+    const logs = details
       .map(detail => normalizeElevenLabsConversation(detail, agentId))
       .filter((log): log is DashboardCallLog => Boolean(log))
       .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+
+    elevenLabsCallLogsCache = {
+      expiresAt: now + 15_000,
+      limit,
+      logs
+    };
+
+    return logs;
   } catch (error) {
     console.warn("Unable to sync ElevenLabs call logs:", error);
     return [];
@@ -1238,11 +1261,61 @@ const transcriptLooksLikeEscalation = (transcript: string) => {
     lower.includes("manager callback form") ||
     lower.includes("urgent callback request") ||
     lower.includes("typed details sent:\nname:") ||
+    lower.includes("talk to manager") ||
+    lower.includes("speak to manager") ||
+    lower.includes("connect you to the manager") ||
+    lower.includes("connect the manager") ||
+    lower.includes("could not connect the manager") ||
+    (lower.includes("unable to connect") && (lower.includes("manager") || lower.includes("human") || lower.includes("refund"))) ||
     (
-      (lower.includes("manager") || lower.includes("human") || lower.includes("refund") || lower.includes("complaint") || lower.includes("payment issue")) &&
-      (lower.includes("phone:") || lower.includes("callback") || lower.includes("call you back") || lower.includes("name:"))
+      (lower.includes("manager") || lower.includes("human") || lower.includes("refund") || lower.includes("complaint") || lower.includes("payment issue") || lower.includes("escalat")) &&
+      (lower.includes("phone:") || lower.includes("callback") || lower.includes("call you back") || lower.includes("name:") || lower.includes("transfer") || lower.includes("connect"))
     )
   );
+};
+
+const transcriptLooksLikeFeedback = (transcript: string) => {
+  const lower = String(transcript || "").toLowerCase();
+  return (
+    lower.includes("feedback submitted") ||
+    lower.includes("thank you for your feedback") ||
+    lower.includes("customer feedback") ||
+    lower.includes("review") ||
+    lower.includes("rating") ||
+    lower.includes("stars") ||
+    lower.includes("star rating")
+  );
+};
+
+const inferFeedbackRating = (transcript: string) => {
+  const lower = String(transcript || "").toLowerCase();
+  const explicit =
+    lower.match(/\b([1-5])\s*(?:star|stars|\/5|out of 5|rating)\b/) ||
+    lower.match(/\brating:\s*([1-5])\b/);
+
+  if (explicit?.[1]) return Number(explicit[1]);
+  if (lower.includes("terrible") || lower.includes("bad") || lower.includes("poor") || lower.includes("unsatisfied")) return 1;
+  if (lower.includes("average") || lower.includes("okay") || lower.includes("ok")) return 3;
+  if (lower.includes("great") || lower.includes("excellent") || lower.includes("amazing") || lower.includes("satisfied")) return 5;
+  return 5;
+};
+
+const extractFeedbackComment = (transcript: string, fallback = "Feedback captured from call transcript") => {
+  const explicit =
+    extractTranscriptField(transcript, "Comment") ||
+    extractTranscriptField(transcript, "Feedback") ||
+    extractTranscriptField(transcript, "Review");
+
+  if (explicit) return explicit;
+
+  const customerLine = String(transcript || "")
+    .split("\n")
+    .map(line => line.trim())
+    .reverse()
+    .find(line => /^(you|customer):/i.test(line) && /feedback|review|rating|stars|great|excellent|amazing|bad|poor|terrible|satisfied|unsatisfied/i.test(line));
+
+  if (customerLine) return customerLine.replace(/^(you|customer):\s*/i, "").trim();
+  return fallback;
 };
 
 const normalizeFeedbackRecord = (feedback: any) => ({
@@ -1255,6 +1328,17 @@ const normalizeFeedbackRecord = (feedback: any) => ({
   comment: feedback.comment || feedback.feedback || feedback.message || "",
   status: feedback.status || "NEW",
   created_at: feedback.created_at || new Date().toISOString()
+});
+
+const feedbackFromCallLog = (log: DashboardCallLog) => normalizeFeedbackRecord({
+  id: `call-feedback-${log.conversation_id || log.id}`,
+  customer_name: log.customer_name,
+  customer_phone: log.customer_phone,
+  customer_email: "feedback@thecarnivore.local",
+  rating: inferFeedbackRating(log.transcript),
+  comment: extractFeedbackComment(log.transcript, log.transcript_summary || "Feedback captured from call transcript"),
+  status: "NEW",
+  created_at: log.created_at
 });
 
 const normalizeEscalationRecord = (escalation: any) => {
@@ -1378,6 +1462,23 @@ const enrichFeedbackWithRecords = (feedbackRows: any[], ordersRows: any[], reser
         matched_record_type: latestOrder ? "order" : latestReservation ? "reservation" : "none"
       };
     });
+};
+
+const dedupeFeedbackRecords = (feedbackRows: any[]) => {
+  const seen = new Set<string>();
+  return feedbackRows
+    .filter((feedback: any) => {
+      const key = [
+        normalizePhoneKey(feedback.customer_phone),
+        normalizeEmailKey(feedback.customer_email),
+        String(feedback.comment || "").slice(0, 120),
+        String(feedback.created_at || "").slice(0, 10)
+      ].join("|");
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .sort((a: any, b: any) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
 };
 
 // 2.9 Customer-facing lookups (Public but strictly filtered)
@@ -1767,11 +1868,14 @@ app.put("/api/reservations/:id", requireOwnerAuth, async (req, res) => {
 
 // 5. Feedback Routing
 app.get("/api/feedback", requireOwnerAuth, async (req, res) => {
+  let feedbackRows: any[] = [];
+  let ordersForContext: any[] = [];
+  let reservationsForContext: any[] = [];
+
   if (supabase && !missingTables.has("feedback")) {
     const { data, error } = await supabase.from("feedback").select("*").order("created_at", { ascending: false });
     if (!error && data) {
-      let ordersForContext: any[] = [];
-      let reservationsForContext: any[] = [];
+      feedbackRows = data;
 
       if (!missingTables.has("orders")) {
         const { data: orderData } = await supabase.from("orders").select("*").order("created_at", { ascending: false }).limit(250);
@@ -1782,12 +1886,40 @@ app.get("/api/feedback", requireOwnerAuth, async (req, res) => {
         const { data: reservationData } = await supabase.from("reservations").select("*").order("created_at", { ascending: false }).limit(250);
         reservationsForContext = reservationData || [];
       }
-
-      return res.json(enrichFeedbackWithRecords(data, ordersForContext, reservationsForContext));
+    } else {
+      handleSupabaseError("feedback", error, "fetch");
     }
-    handleSupabaseError("feedback", error, "fetch");
+  } else {
+    feedbackRows = [...localFeedback];
   }
-  res.json(enrichFeedbackWithRecords(localFeedback, localOrders, localReservations));
+
+  if (supabase && !missingTables.has("call_logs")) {
+    const { data: savedCallLogs, error: callLogError } = await supabase
+      .from("call_logs")
+      .select("*")
+      .order("created_at", { ascending: false })
+      .limit(100);
+
+    if (!callLogError && savedCallLogs) {
+      const callLogFeedback = savedCallLogs
+        .map(normalizeSavedCallLog)
+        .filter(log => transcriptLooksLikeFeedback(log.transcript))
+        .map(feedbackFromCallLog);
+      feedbackRows.push(...callLogFeedback);
+    } else {
+      handleSupabaseError("call_logs", callLogError, "fetch-feedback");
+    }
+  }
+
+  const elevenLabsFeedback = (await fetchElevenLabsCallLogs(50))
+    .filter(log => transcriptLooksLikeFeedback(log.transcript))
+    .map(feedbackFromCallLog);
+  feedbackRows.push(...elevenLabsFeedback);
+
+  const contextOrders = ordersForContext.length ? ordersForContext : localOrders;
+  const contextReservations = reservationsForContext.length ? reservationsForContext : localReservations;
+
+  res.json(dedupeFeedbackRecords(enrichFeedbackWithRecords(feedbackRows, contextOrders, contextReservations)));
 });
 
 app.post("/api/feedback", async (req, res) => {
@@ -1808,6 +1940,23 @@ app.post("/api/feedback", async (req, res) => {
     const inserted = await insertSupabaseVariant("feedback", feedbackInsertVariants(newFb));
     if (inserted) {
       return res.status(201).json(normalizeFeedbackRecord(inserted));
+    }
+  }
+
+  if (supabase && !missingTables.has("call_logs")) {
+    const fallbackLog = await insertSupabaseVariant("call_logs", [{
+      customer_name: newFb.customer_name,
+      customer_phone: newFb.customer_phone,
+      duration_seconds: 0,
+      transcript: `Feedback submitted\nName: ${newFb.customer_name}\nPhone: ${newFb.customer_phone}\nEmail: ${newFb.customer_email}\nRating: ${newFb.rating}\nComment: ${newFb.comment}`,
+      status: "COMPLETED"
+    }]);
+
+    if (fallbackLog) {
+      return res.status(201).json({
+        ...newFb,
+        id: `call-feedback-${fallbackLog.id || newFb.id}`
+      });
     }
   }
 
@@ -1862,6 +2011,21 @@ app.get("/api/escalations", requireOwnerAuth, async (req, res) => {
       handleSupabaseError("call_logs", callLogError, "fetch-escalated");
     }
   }
+
+  const elevenLabsEscalations = (await fetchElevenLabsCallLogs(50))
+    .filter(log => log.status === "ESCALATED" || transcriptLooksLikeEscalation(log.transcript))
+    .map(log => normalizeEscalationRecord({
+      id: `elevenlabs-${log.conversation_id || log.id}`,
+      customer_name: log.customer_name,
+      customer_phone: log.customer_phone,
+      reason: inferEscalationReason(log.transcript, "Manager transfer or callback requested from phone call"),
+      transcript: log.transcript,
+      status: "PENDING",
+      created_at: log.created_at,
+      updated_at: log.created_at
+    }));
+
+  normalizedEscalations.push(...elevenLabsEscalations);
 
   if (normalizedEscalations.length === 0) {
     normalizedEscalations = localEscalations.map(normalizeEscalationRecord);

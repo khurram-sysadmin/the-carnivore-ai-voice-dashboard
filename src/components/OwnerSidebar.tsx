@@ -1,5 +1,5 @@
 import React from 'react';
-import { LayoutGrid, ShoppingBag, Calendar, ListCollapse, AlertTriangle, Sparkles, Database, Webhook, LogOut, PhoneCall, TrendingUp } from 'lucide-react';
+import { LayoutGrid, ShoppingBag, Calendar, ListCollapse, AlertTriangle, LogOut, PhoneCall, TrendingUp } from 'lucide-react';
 import CarnivoreLogo from './CarnivoreLogo';
 
 interface OwnerSidebarProps {
@@ -61,42 +61,11 @@ export default function OwnerSidebar({ currentTab, onTabChange, config, onLogOut
         })}
       </nav>
 
-      {/* Bottom Integration Statuses */}
+      {/* Bottom Admin Action */}
       <div className="p-4 border-t border-zinc-900 bg-zinc-950">
-        <div className="space-y-2.5 p-3 bg-zinc-900 rounded-xl border border-zinc-850">
-          <span className="text-[9px] uppercase font-black text-zinc-500 tracking-wider block">
-            System Integrations
-          </span>
-
-          <div className="flex items-center justify-between text-xs text-zinc-400">
-            <span className="flex items-center gap-1.5">
-              <Database className="w-3.5 h-3.5 text-zinc-500" />
-              Supabase
-            </span>
-            <span className={`w-2 h-2 rounded-full ${config.isSupabaseConfigured ? 'bg-emerald-500' : 'bg-amber-500'}`} title={config.isSupabaseConfigured ? 'Connected' : 'Fallback Mode'} />
-          </div>
-
-          <div className="flex items-center justify-between text-xs text-zinc-400">
-            <span className="flex items-center gap-1.5">
-              <Webhook className="w-3.5 h-3.5 text-zinc-500" />
-              n8n Webhook
-            </span>
-            <span className={`w-2 h-2 rounded-full ${config.hasN8nWebhook ? 'bg-emerald-500' : 'bg-zinc-600'}`} />
-          </div>
-
-          <div className="flex items-center justify-between text-xs text-zinc-400">
-            <span className="flex items-center gap-1.5">
-              <Sparkles className="w-3.5 h-3.5 text-zinc-500" />
-              Voice agent (Zara)
-            </span>
-            <span className="text-[10px] font-mono text-zinc-500 uppercase">Live</span>
-          </div>
-        </div>
-
-        {/* Logout */}
         <button
           onClick={onLogOut}
-          className="w-full flex items-center gap-2 justify-center mt-4 text-xs font-semibold text-zinc-400 hover:text-red-500 py-2 rounded-lg hover:bg-red-950/20 transition-colors border border-transparent hover:border-red-950/40 cursor-pointer"
+          className="w-full flex items-center gap-2 justify-center text-xs font-semibold text-zinc-400 hover:text-red-500 py-2 rounded-lg hover:bg-red-950/20 transition-colors border border-transparent hover:border-red-950/40 cursor-pointer"
         >
           <LogOut className="w-3.5 h-3.5" />
           Log Out Admin

@@ -519,7 +519,9 @@ export default function App() {
         customer_phone: fbPhone,
         customer_email: fbEmail,
         rating: fbRating,
-        comment: fbComment
+        comment: fbComment,
+        conversation_id: postCallContext?.conversation_id,
+        call_log_id: postCallContext?.id
       })
     })
     .then(() => {
