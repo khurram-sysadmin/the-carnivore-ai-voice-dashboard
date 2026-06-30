@@ -2289,42 +2289,47 @@ export default function App() {
                     <p className="text-xs text-zinc-400 italic py-6 text-center">No customer feedback yet.</p>
                   ) : (
                     <div className="space-y-4">
-                    {feedback.map(fb => (
-                      <div key={fb.id} className="border border-zinc-150 rounded-xl p-4 space-y-3 bg-white">
-                        <div className="flex items-center justify-between">
-                          <span className="font-bold text-xs text-zinc-800">{fb.customer_name}</span>
-                          <div className="flex gap-0.5">
-                            {[1, 2, 3, 4, 5].map(s => (
-                              <Star key={s} className={`w-3.5 h-3.5 ${fb.rating >= s ? 'text-amber-500 fill-amber-500' : 'text-zinc-200'}`} />
-                            ))}
+                      {feedback.map(fb => (
+                        <div key={fb.id} className="border border-amber-100 rounded-2xl p-4 bg-white hover:border-amber-200 hover:shadow-md transition-all duration-200">
+                          <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+                            <div className="min-w-0 space-y-1">
+                              <span className="block font-black text-sm text-zinc-900 truncate">{fb.customer_name}</span>
+                              <span className="block text-[11px] font-medium text-zinc-400">{new Date(fb.created_at).toLocaleDateString()} at {new Date(fb.created_at).toLocaleTimeString()}</span>
+                            </div>
+                            <div className="flex gap-0.5 shrink-0">
+                              {[1, 2, 3, 4, 5].map(s => (
+                                <Star key={s} className={`w-3.5 h-3.5 ${fb.rating >= s ? 'text-amber-500 fill-amber-500' : 'text-zinc-200'}`} />
+                              ))}
+                            </div>
                           </div>
-                        </div>
-                        <div className="flex flex-wrap gap-2 text-[10px] font-bold">
-                          {fb.customer_phone && (
-                            <span className="bg-zinc-100 text-zinc-600 border border-zinc-200 px-2 py-1 rounded-full">{fb.customer_phone}</span>
+
+                          <div className="mt-3 flex flex-wrap gap-2 text-[10px] font-bold">
+                            {fb.customer_phone && (
+                              <span className="bg-zinc-100 text-zinc-600 border border-zinc-200 px-2 py-1 rounded-full">{fb.customer_phone}</span>
+                            )}
+                            {fb.customer_email && (
+                              <span className="bg-zinc-100 text-zinc-600 border border-zinc-200 px-2 py-1 rounded-full break-all">{fb.customer_email}</span>
+                            )}
+                          </div>
+
+                          <p className="mt-3 rounded-xl border border-zinc-100 bg-zinc-50 px-3 py-2 text-xs leading-relaxed text-zinc-700 italic">"{fb.comment}"</p>
+
+                          {fb.latest_order_number ? (
+                            <div className="mt-3 bg-amber-50 border border-amber-100 rounded-xl p-3 text-[11px] text-amber-900 space-y-1">
+                              <p className="font-black uppercase tracking-wide">Related order {fb.latest_order_number}</p>
+                              <p className="font-semibold">{fb.latest_order_summary || 'Order items unavailable'}</p>
+                              <p className="font-bold">Total: PKR {Number(fb.latest_order_total || 0).toLocaleString()}</p>
+                            </div>
+                          ) : fb.latest_reservation_number ? (
+                            <div className="mt-3 bg-teal-50 border border-teal-100 rounded-xl p-3 text-[11px] text-teal-900 space-y-1">
+                              <p className="font-black uppercase tracking-wide">Related reservation {fb.latest_reservation_number}</p>
+                              <p className="font-semibold">{fb.latest_reservation_details}</p>
+                            </div>
+                          ) : (
+                            <p className="mt-3 text-[10px] font-semibold text-zinc-400">No matching order or reservation found yet.</p>
                           )}
-                          {fb.customer_email && (
-                            <span className="bg-zinc-100 text-zinc-600 border border-zinc-200 px-2 py-1 rounded-full">{fb.customer_email}</span>
-                          )}
                         </div>
-                        <p className="text-xs text-zinc-600 italic">"{fb.comment}"</p>
-                        {fb.latest_order_number ? (
-                          <div className="bg-amber-50 border border-amber-100 rounded-xl p-3 text-[11px] text-amber-900 space-y-1">
-                            <p className="font-black uppercase tracking-wide">Related order {fb.latest_order_number}</p>
-                            <p className="font-semibold">{fb.latest_order_summary || 'Order items unavailable'}</p>
-                            <p className="font-bold">Total: PKR {Number(fb.latest_order_total || 0).toLocaleString()}</p>
-                          </div>
-                        ) : fb.latest_reservation_number ? (
-                          <div className="bg-teal-50 border border-teal-100 rounded-xl p-3 text-[11px] text-teal-900 space-y-1">
-                            <p className="font-black uppercase tracking-wide">Related reservation {fb.latest_reservation_number}</p>
-                            <p className="font-semibold">{fb.latest_reservation_details}</p>
-                          </div>
-                        ) : (
-                          <p className="text-[10px] font-semibold text-zinc-400">No matching order or reservation found yet.</p>
-                        )}
-                        <span className="text-[9px] text-zinc-400 block">{new Date(fb.created_at).toLocaleDateString()}</span>
-                      </div>
-                    ))}
+                      ))}
                     </div>
                   )}
                 </div>

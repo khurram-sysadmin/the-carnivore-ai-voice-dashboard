@@ -1393,6 +1393,16 @@ const escalationInsertVariants = (escalation: any) => [
     customer_email: escalation.customer_email,
     reason: escalation.reason,
     transcript: escalation.transcript,
+    status: escalation.status,
+    created_at: escalation.created_at,
+    updated_at: escalation.updated_at
+  },
+  {
+    customer_name: escalation.customer_name,
+    customer_phone: escalation.customer_phone,
+    customer_email: escalation.customer_email,
+    reason: escalation.reason,
+    transcript: escalation.transcript,
     status: escalation.status
   },
   {
@@ -1401,6 +1411,14 @@ const escalationInsertVariants = (escalation: any) => [
     reason: escalation.reason,
     transcript: escalation.transcript,
     status: escalation.status
+  },
+  {
+    customer_phone: escalation.customer_phone,
+    transcript: `Name: ${escalation.customer_name}\nPhone: ${escalation.customer_phone}\nReason: ${escalation.reason}\n\n${escalation.transcript || ""}`,
+    session_id: escalation.id,
+    status: escalation.status,
+    created_at: escalation.created_at,
+    updated_at: escalation.updated_at
   },
   {
     customer_phone: escalation.customer_phone,
@@ -1422,6 +1440,15 @@ const feedbackInsertVariants = (feedback: any) => [
     customer_email: feedback.customer_email,
     rating: feedback.rating,
     comment: feedback.comment,
+    status: feedback.status,
+    created_at: feedback.created_at
+  },
+  {
+    customer_name: feedback.customer_name,
+    customer_phone: feedback.customer_phone,
+    customer_email: feedback.customer_email,
+    rating: feedback.rating,
+    comment: feedback.comment,
     status: feedback.status
   },
   {
@@ -1435,7 +1462,8 @@ const feedbackInsertVariants = (feedback: any) => [
     customer_phone: feedback.customer_phone,
     rating: feedback.rating,
     comment: `Name: ${feedback.customer_name}\nEmail: ${feedback.customer_email}\n\n${feedback.comment}`,
-    session_id: feedback.id
+    session_id: feedback.id,
+    created_at: feedback.created_at
   },
   {
     customer_phone: feedback.customer_phone,
@@ -1516,6 +1544,32 @@ const escalationPersistenceKey = (escalation: any) => [
   recordDateKey(escalation.created_at),
   recordTextKey(escalation.transcript || escalation.reason)
 ].join("|");
+
+const findExistingSupabaseRecord = async (
+  tableName: string,
+  candidate: any,
+  normalize: (row: any) => any,
+  keyForRow: (row: any) => string
+) => {
+  if (!supabase || missingTables.has(tableName)) return null;
+
+  const normalizedCandidate = normalize(candidate);
+  const candidateKey = keyForRow(normalizedCandidate);
+  const { data, error } = await supabase
+    .from(tableName)
+    .select("*")
+    .order("created_at", { ascending: false })
+    .limit(500);
+
+  if (error) {
+    handleSupabaseError(tableName, error, "duplicate-check");
+    return null;
+  }
+
+  return (data || [])
+    .map(normalize)
+    .find((row: any) => keyForRow(row) === candidateKey) || null;
+};
 
 const escalationStatusPriority = (status: any) => {
   const normalized = normalizeEscalationStatus(status);
@@ -2048,6 +2102,11 @@ app.post("/api/feedback", async (req, res) => {
   });
 
   if (supabase && !missingTables.has("feedback")) {
+    const existingFeedback = await findExistingSupabaseRecord("feedback", newFb, normalizeFeedbackRecord, feedbackPersistenceKey);
+    if (existingFeedback) {
+      return res.status(200).json(existingFeedback);
+    }
+
     const inserted = await insertSupabaseVariant("feedback", feedbackInsertVariants(newFb));
     if (inserted) {
       return res.status(201).json(normalizeFeedbackRecord(inserted));
@@ -2170,6 +2229,11 @@ app.post("/api/escalations", async (req, res) => {
   });
 
   if (supabase && !missingTables.has("escalations")) {
+    const existingEscalation = await findExistingSupabaseRecord("escalations", newEsc, normalizeEscalationRecord, escalationPersistenceKey);
+    if (existingEscalation) {
+      return res.status(200).json(existingEscalation);
+    }
+
     const inserted = await insertSupabaseVariant("escalations", escalationInsertVariants(newEsc));
     if (inserted) return res.status(201).json(normalizeEscalationRecord(inserted));
   }
@@ -2362,8 +2426,9 @@ app.post("/api/call-logs", async (req, res) => {
     };
 
     if (supabase && !missingTables.has("escalations")) {
-      const insertedEscalation = await insertSupabaseVariant("escalations", escalationInsertVariants(newEsc));
-      if (!insertedEscalation) {
+      const existingEscalation = await findExistingSupabaseRecord("escalations", newEsc, normalizeEscalationRecord, escalationPersistenceKey);
+      const insertedEscalation = existingEscalation || await insertSupabaseVariant("escalations", escalationInsertVariants(newEsc));
+      if (!insertedEscalation && !existingEscalation) {
         console.warn("Escalation table insert failed from call log; the ESCALATED call_log row will be used as admin fallback.");
       }
     }
