@@ -220,6 +220,8 @@ let localFeedback: any[] = [];
 
 let localEscalations: any[] = [];
 
+let localCustomerAccounts: any[] = [];
+
 let localCallLogs = [
   {
     id: "call-1",
@@ -451,8 +453,11 @@ app.get("/api/config", (req, res) => {
 // Vercel functions do not share memory, so owner sessions must be signed tokens.
 type OwnerSession = { email: string; expires: number };
 const OWNER_SESSION_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+type CustomerSession = { id: string; email: string; name: string; phone: string; expires: number };
+const CUSTOMER_SESSION_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 
 const getOwnerSessionSecret = () => process.env.OWNER_SESSION_SECRET;
+const getCustomerSessionSecret = () => process.env.CUSTOMER_SESSION_SECRET || process.env.OWNER_SESSION_SECRET;
 
 const signOwnerSession = (email: string) => {
   const secret = getOwnerSessionSecret();
@@ -489,12 +494,58 @@ const verifyOwnerSession = (token: string | null): OwnerSession | null => {
   }
 };
 
+const signCustomerSession = (account: any) => {
+  const secret = getCustomerSessionSecret();
+  if (!secret) return null;
+  const payload: CustomerSession = {
+    id: String(account.id || account.email),
+    email: normalizeEmailKey(account.email),
+    name: account.name || account.customer_name || "Customer",
+    phone: account.phone || account.customer_phone || "",
+    expires: Date.now() + CUSTOMER_SESSION_MAX_AGE_MS
+  };
+  const encodedPayload = Buffer.from(JSON.stringify(payload)).toString("base64url");
+  const signature = crypto.createHmac("sha256", secret).update(encodedPayload).digest("base64url");
+  return `${encodedPayload}.${signature}`;
+};
+
+const verifyCustomerSession = (token: string | null): CustomerSession | null => {
+  const secret = getCustomerSessionSecret();
+  if (!token || !secret) return null;
+  const [encodedPayload, signature] = token.split(".");
+  if (!encodedPayload || !signature) return null;
+
+  const expectedSignature = crypto.createHmac("sha256", secret).update(encodedPayload).digest("base64url");
+  const signatureBuffer = Buffer.from(signature);
+  const expectedBuffer = Buffer.from(expectedSignature);
+  if (signatureBuffer.length !== expectedBuffer.length || !crypto.timingSafeEqual(signatureBuffer, expectedBuffer)) {
+    return null;
+  }
+
+  try {
+    const session = JSON.parse(Buffer.from(encodedPayload, "base64url").toString("utf8")) as CustomerSession;
+    if (!session.email || !session.expires || session.expires < Date.now()) return null;
+    return session;
+  } catch {
+    return null;
+  }
+};
+
 const setOwnerSessionCookie = (res: express.Response, token: string) => {
   res.cookie("owner_session", token, {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production" || process.env.VERCEL === "1",
     sameSite: "strict",
     maxAge: OWNER_SESSION_MAX_AGE_MS
+  });
+};
+
+const setCustomerSessionCookie = (res: express.Response, token: string) => {
+  res.cookie("customer_session", token, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production" || process.env.VERCEL === "1",
+    sameSite: "strict",
+    maxAge: CUSTOMER_SESSION_MAX_AGE_MS
   });
 };
 
@@ -513,6 +564,19 @@ const getSessionToken = (req: express.Request) => {
   return null;
 };
 
+const getCustomerSessionToken = (req: express.Request) => {
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith("Bearer ")) {
+    return authHeader.substring(7);
+  }
+  const cookieHeader = req.headers.cookie;
+  if (cookieHeader) {
+    const match = cookieHeader.match(/customer_session=([^;]+)/);
+    if (match) return match[1];
+  }
+  return null;
+};
+
 // Middleware to protect owner-only routes
 const requireOwnerAuth = (req: express.Request, res: express.Response, next: express.NextFunction) => {
   const token = getSessionToken(req);
@@ -525,6 +589,87 @@ const requireOwnerAuth = (req: express.Request, res: express.Response, next: exp
     return res.status(401).json({ error: "Unauthorized. Session expired or invalid." });
   }
   next();
+};
+
+const requireCustomerAuth = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  const token = getCustomerSessionToken(req);
+  if (!token) {
+    return res.status(401).json({ error: "Customer session token missing." });
+  }
+  const session = verifyCustomerSession(token);
+  if (!session) {
+    res.clearCookie("customer_session");
+    return res.status(401).json({ error: "Customer session expired or invalid." });
+  }
+  (req as any).customerSession = session;
+  next();
+};
+
+const hashCustomerPassword = (password: string, salt = crypto.randomBytes(16).toString("hex")) => {
+  const hash = crypto.scryptSync(password, salt, 64).toString("hex");
+  return { salt, hash };
+};
+
+const verifyCustomerPassword = (password: string, salt: string, expectedHash: string) => {
+  const { hash } = hashCustomerPassword(password, salt);
+  const hashBuffer = Buffer.from(hash, "hex");
+  const expectedBuffer = Buffer.from(expectedHash || "", "hex");
+  return hashBuffer.length === expectedBuffer.length && crypto.timingSafeEqual(hashBuffer, expectedBuffer);
+};
+
+const publicCustomerAccount = (account: any) => ({
+  id: String(account.id || account.email),
+  name: account.name || account.customer_name || "Customer",
+  phone: account.phone || account.customer_phone || "",
+  email: normalizeEmailKey(account.email || account.customer_email)
+});
+
+const findCustomerAccountByEmail = async (email: string) => {
+  const normalizedEmail = normalizeEmailKey(email);
+
+  if (supabase && !missingTables.has("customer_accounts")) {
+    const { data, error } = await supabase
+      .from("customer_accounts")
+      .select("*")
+      .eq("email", normalizedEmail)
+      .maybeSingle();
+
+    if (!error) return data || null;
+    handleSupabaseError("customer_accounts", error, "fetch");
+  }
+
+  if (isSupabaseConfigured && missingTables.has("customer_accounts")) return null;
+  return localCustomerAccounts.find(account => normalizeEmailKey(account.email) === normalizedEmail) || null;
+};
+
+const sendWelcomeEmail = async (account: any) => {
+  const webhookUrl = process.env.WELCOME_EMAIL_WEBHOOK_URL;
+  if (!webhookUrl) {
+    return { queued: false, reason: "WELCOME_EMAIL_WEBHOOK_URL is not configured." };
+  }
+
+  const payload = {
+    event: "customer_signup_welcome_email",
+    customer_name: account.name,
+    customer_email: account.email,
+    customer_phone: account.phone,
+    subject: "Welcome to The Carnivore",
+    message: `Hi ${account.name}, welcome to The Carnivore. Your customer account is ready. You can now log in to view your orders and reservations anytime.`,
+    created_at: new Date().toISOString()
+  };
+
+  try {
+    const response = await fetch(webhookUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+
+    return { queued: response.ok, status: response.status };
+  } catch (error: any) {
+    console.warn("Failed to queue welcome email:", error);
+    return { queued: false, reason: error.message || "Webhook request failed." };
+  }
 };
 
 // Owner Auth Status Endpoint
@@ -595,6 +740,144 @@ app.post("/api/admin/login", (req, res) => {
 // Owner Logout Endpoint
 app.post("/api/auth/owner/logout", (req, res) => {
   res.clearCookie("owner_session");
+  return res.json({ success: true, message: "Logged out successfully" });
+});
+
+// Customer Auth Status Endpoint
+app.get("/api/auth/customer/me", (req, res) => {
+  const session = verifyCustomerSession(getCustomerSessionToken(req));
+  if (!session) {
+    return res.status(401).json({ authenticated: false, error: "No active customer session." });
+  }
+
+  return res.json({ authenticated: true, customer: publicCustomerAccount(session) });
+});
+
+// Customer Signup Endpoint
+app.post("/api/auth/customer/signup", async (req, res) => {
+  const name = String(req.body.name || "").trim();
+  const phone = String(req.body.phone || "").trim();
+  const email = normalizeEmailKey(req.body.email);
+  const password = String(req.body.password || "");
+
+  if (!name || !phone || !email || !password) {
+    return res.status(400).json({ success: false, error: "Name, phone, email, and password are required." });
+  }
+
+  if (!email.includes("@") || !email.includes(".")) {
+    return res.status(400).json({ success: false, error: "Please enter a valid email address." });
+  }
+
+  if (password.length < 8) {
+    return res.status(400).json({ success: false, error: "Password must be at least 8 characters." });
+  }
+
+  const existing = await findCustomerAccountByEmail(email);
+  if (existing) {
+    return res.status(409).json({ success: false, error: "An account already exists with this email. Please log in instead." });
+  }
+
+  const { salt, hash } = hashCustomerPassword(password);
+  const now = new Date().toISOString();
+  const accountPayload = {
+    name,
+    phone,
+    email,
+    password_hash: hash,
+    password_salt: salt,
+    created_at: now,
+    updated_at: now
+  };
+
+  let account = { id: `cust-${Date.now()}`, ...accountPayload };
+
+  if (supabase && !missingTables.has("customer_accounts")) {
+    const { data, error } = await supabase
+      .from("customer_accounts")
+      .insert([accountPayload])
+      .select()
+      .maybeSingle();
+
+    if (error) {
+      handleSupabaseError("customer_accounts", error, "signup");
+      if (missingTables.has("customer_accounts")) {
+        return res.status(503).json({
+          success: false,
+          error: "Customer accounts table is missing in Supabase. Run the customer_accounts migration from supabase_schema.sql, then try again."
+        });
+      }
+      return res.status(500).json({ success: false, error: "Could not create customer account." });
+    }
+
+    account = data;
+  } else if (isSupabaseConfigured) {
+    return res.status(503).json({
+      success: false,
+      error: "Customer accounts table is missing in Supabase. Run the customer_accounts migration from supabase_schema.sql, then try again."
+    });
+  } else {
+    localCustomerAccounts.push(account);
+  }
+
+  const token = signCustomerSession(account);
+  if (!token) {
+    return res.status(500).json({ success: false, error: "Customer session signing is not configured." });
+  }
+
+  setCustomerSessionCookie(res, token);
+  const welcomeEmail = await sendWelcomeEmail(account);
+
+  return res.status(201).json({
+    success: true,
+    token,
+    customer: publicCustomerAccount(account),
+    welcomeEmail
+  });
+});
+
+// Customer Login Endpoint
+app.post("/api/auth/customer/login", async (req, res) => {
+  const email = normalizeEmailKey(req.body.email);
+  const password = String(req.body.password || "");
+
+  if (!email || !password) {
+    return res.status(400).json({ success: false, error: "Email and password are required." });
+  }
+
+  const account = await findCustomerAccountByEmail(email);
+  if (!account) {
+    if (isSupabaseConfigured && missingTables.has("customer_accounts")) {
+      return res.status(503).json({
+        success: false,
+        error: "Customer accounts table is missing in Supabase. Run the customer_accounts migration from supabase_schema.sql, then try again."
+      });
+    }
+    return res.status(401).json({ success: false, error: "Invalid customer email or password." });
+  }
+
+  if (!verifyCustomerPassword(password, account.password_salt, account.password_hash)) {
+    return res.status(401).json({ success: false, error: "Invalid customer email or password." });
+  }
+
+  if (supabase && !missingTables.has("customer_accounts")) {
+    await supabase
+      .from("customer_accounts")
+      .update({ last_login_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+      .eq("id", account.id);
+  }
+
+  const token = signCustomerSession(account);
+  if (!token) {
+    return res.status(500).json({ success: false, error: "Customer session signing is not configured." });
+  }
+
+  setCustomerSessionCookie(res, token);
+  return res.json({ success: true, token, customer: publicCustomerAccount(account) });
+});
+
+// Customer Logout Endpoint
+app.post("/api/auth/customer/logout", (req, res) => {
+  res.clearCookie("customer_session");
   return res.json({ success: true, message: "Logged out successfully" });
 });
 
@@ -1670,6 +1953,97 @@ const persistEscalationsToSupabase = async (derivedRows: any[], existingRows: an
 
   return persistedRows;
 };
+
+const dedupeById = (rows: any[]) => {
+  const seen = new Set<string>();
+  return rows.filter(row => {
+    const key = String(row.id || row.order_number || row.reservation_number || JSON.stringify(row));
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+};
+
+// 2.8 Logged-in customer records
+app.get("/api/customer/me/orders", requireCustomerAuth, async (req, res) => {
+  const session = (req as any).customerSession as CustomerSession;
+  const email = normalizeEmailKey(session.email);
+  const phone = session.phone;
+
+  if (supabase && !missingTables.has("orders")) {
+    const results: any[] = [];
+
+    if (email) {
+      const { data, error } = await supabase
+        .from("orders")
+        .select("*")
+        .eq("customer_email", email)
+        .order("created_at", { ascending: false });
+
+      if (!error && data) results.push(...data);
+      else handleSupabaseError("orders", error, "customer-account-fetch");
+    }
+
+    if (phone) {
+      const { data, error } = await supabase
+        .from("orders")
+        .select("*")
+        .eq("customer_phone", phone)
+        .order("created_at", { ascending: false });
+
+      if (!error && data) results.push(...data);
+      else handleSupabaseError("orders", error, "customer-account-fetch");
+    }
+
+    return res.json(dedupeById(results).map(sanitizeOrder));
+  }
+
+  const results = localOrders.filter(order =>
+    normalizeEmailKey(order.customer_email) === email ||
+    normalizePhoneKey(order.customer_phone) === normalizePhoneKey(phone)
+  );
+  return res.json(results.map(sanitizeOrder).sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()));
+});
+
+app.get("/api/customer/me/reservations", requireCustomerAuth, async (req, res) => {
+  const session = (req as any).customerSession as CustomerSession;
+  const email = normalizeEmailKey(session.email);
+  const phone = session.phone;
+
+  if (supabase && !missingTables.has("reservations")) {
+    const results: any[] = [];
+
+    if (email) {
+      const { data, error } = await supabase
+        .from("reservations")
+        .select("*")
+        .eq("customer_email", email)
+        .order("created_at", { ascending: false });
+
+      if (!error && data) results.push(...data);
+      else handleSupabaseError("reservations", error, "customer-account-fetch");
+    }
+
+    if (phone) {
+      const { data, error } = await supabase
+        .from("reservations")
+        .select("*")
+        .eq("customer_phone", phone)
+        .order("created_at", { ascending: false });
+
+      if (!error && data) results.push(...data);
+      else handleSupabaseError("reservations", error, "customer-account-fetch");
+    }
+
+    return res.json(dedupeById(results).map(normalizeReservation));
+  }
+
+  const results = localReservations.filter(reservation =>
+    normalizeEmailKey(reservation.customer_email) === email ||
+    normalizePhoneKey(reservation.customer_phone) === normalizePhoneKey(phone)
+  );
+  return res.json(results.map(normalizeReservation).sort((a, b) => reservationSortValue(b) - reservationSortValue(a)));
+});
 
 // 2.9 Customer-facing lookups (Public but strictly filtered)
 app.get("/api/customer/orders", async (req, res) => {

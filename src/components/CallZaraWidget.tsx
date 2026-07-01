@@ -7,6 +7,11 @@ interface CallZaraWidgetProps {
   onRecordCreated: (record?: any) => void;
   preSelectedAction?: string;
   onClearAction?: () => void;
+  customerAccount?: {
+    name: string;
+    phone: string;
+    email: string;
+  } | null;
 }
 
 interface CallState {
@@ -180,7 +185,7 @@ const formatTranscriptText = (text: string) => {
     .trim();
 };
 
-export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onClearAction }: CallZaraWidgetProps) {
+export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onClearAction, customerAccount }: CallZaraWidgetProps) {
   const [callState, setCallState] = useState<CallState>({ status: 'idle', message: 'Click to call Zara' });
   const [transcript, setTranscript] = useState<{ speaker: 'Zara' | 'You'; text: string }[]>([]);
   const [isMuted, setIsMuted] = useState(false);
@@ -195,9 +200,9 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
   const [chatLoading, setChatLoading] = useState(false);
   const [chatSessionState, setChatSessionState] = useState<'idle' | 'connecting' | 'connected' | 'failed'>('idle');
   const [typedDetails, setTypedDetails] = useState({
-    name: '',
-    phone: '',
-    email: ''
+    name: customerAccount?.name || '',
+    phone: customerAccount?.phone || '',
+    email: customerAccount?.email || ''
   });
   const [detailsFormVisible, setDetailsFormVisible] = useState(false);
   const [detailsFormMode, setDetailsFormMode] = useState<'contact' | 'callback'>('contact');
@@ -214,6 +219,15 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
   const sessionAgentIdRef = useRef<string>('');
 
   const animationFrameRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (!customerAccount) return;
+    setTypedDetails(prev => ({
+      name: prev.name || customerAccount.name || '',
+      phone: prev.phone || customerAccount.phone || '',
+      email: prev.email || customerAccount.email || ''
+    }));
+  }, [customerAccount?.name, customerAccount?.phone, customerAccount?.email]);
 
   // Clean up UI animation resources when conversation ends or unmounts.
   const cleanupAudioVisualizer = () => {
@@ -578,7 +592,11 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
     setDetailsSent(false);
     setDetailsFormVisible(false);
     setDetailsFormMode('contact');
-    setTypedDetails({ name: '', phone: '', email: '' });
+    setTypedDetails({
+      name: customerAccount?.name || '',
+      phone: customerAccount?.phone || '',
+      email: customerAccount?.email || ''
+    });
     conversationIdRef.current = '';
     sessionAgentIdRef.current = '';
     callStartTime.current = null;

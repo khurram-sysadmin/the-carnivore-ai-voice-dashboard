@@ -4,10 +4,10 @@ import {
   Sparkles, Phone, ShoppingBag, Calendar, ListCollapse, AlertTriangle, ShieldCheck, 
   Search, Filter, Plus, Check, RefreshCw, Star, MessageSquare, AlertCircle, Eye, 
   ArrowRight, LogIn, LogOut, ChevronRight, CheckCircle2, TrendingUp, DollarSign, Users, 
-  Clock, X, ChevronDown, UserCircle, LayoutGrid, PhoneCall, Play, Pause, Volume2, Cpu, Zap, ThumbsUp, Info
+  Clock, X, ChevronDown, UserCircle, LayoutGrid, PhoneCall, Play, Pause, Volume2, Cpu, Zap, ThumbsUp, Info, UserPlus, Mail
 } from 'lucide-react';
 
-import { Order, Reservation, MenuItem, ActivityEvent, FeedbackItem, EscalationItem, OrderStatus, ReservationStatus, CallLog } from './types';
+import { Order, Reservation, MenuItem, ActivityEvent, FeedbackItem, EscalationItem, OrderStatus, ReservationStatus, CallLog, CustomerAccount } from './types';
 import CallZaraWidget from './components/CallZaraWidget';
 import StatusBadge from './components/StatusBadge';
 import OrderCard from './components/OrderCard';
@@ -90,6 +90,14 @@ export default function App() {
   const [role, setRole] = useState<'customer' | 'owner'>('customer');
   const [isOwnerAuthenticated, setIsOwnerAuthenticated] = useState(false);
   const [activeTab, setActiveTab] = useState('call'); // For customer: 'call' | 'orders' | 'reservations'
+  const [customerAccount, setCustomerAccount] = useState<CustomerAccount | null>(null);
+  const [customerAuthMode, setCustomerAuthMode] = useState<'signup' | 'login'>('signup');
+  const [customerAuthLoading, setCustomerAuthLoading] = useState(false);
+  const [customerAuthError, setCustomerAuthError] = useState('');
+  const [customerName, setCustomerName] = useState('');
+  const [customerPhone, setCustomerPhone] = useState('');
+  const [customerEmail, setCustomerEmail] = useState('');
+  const [customerPassword, setCustomerPassword] = useState('');
   
   // Admin Login Form
   const [adminEmail, setAdminEmail] = useState('');
@@ -220,6 +228,16 @@ export default function App() {
         .then(r => r.json())
         .then(setCallLogs)
         .catch(e => console.error("Error loading call logs:", e));
+    } else if (customerAccount) {
+      Promise.all([
+        fetch('/api/customer/me/orders').then(r => r.ok ? r.json() : []),
+        fetch('/api/customer/me/reservations').then(r => r.ok ? r.json() : [])
+      ])
+      .then(([customerOrders, customerReservations]) => {
+        setOrders(customerOrders);
+        setReservations(customerReservations);
+      })
+      .catch(e => console.error("Error loading customer records:", e));
     }
   };
 
@@ -228,7 +246,7 @@ export default function App() {
     // Poll updates every 10 seconds for real-time dashboard feel
     const interval = setInterval(loadData, 10000);
     return () => clearInterval(interval);
-  }, [isOwnerAuthenticated]);
+  }, [isOwnerAuthenticated, customerAccount?.email]);
 
   useEffect(() => {
     if (!isOwnerAuthenticated) {
@@ -316,6 +334,72 @@ export default function App() {
       })
       .catch(e => console.warn("Not authenticated on start:", e));
   }, []);
+
+  useEffect(() => {
+    fetch('/api/auth/customer/me')
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (data?.authenticated && data.customer) {
+          setCustomerAccount(data.customer);
+          setRole('customer');
+        }
+      })
+      .catch(e => console.warn("No customer session on start:", e));
+  }, []);
+
+  const handleCustomerAuth = (e: React.FormEvent) => {
+    e.preventDefault();
+    setCustomerAuthError('');
+    setCustomerAuthLoading(true);
+
+    const endpoint = customerAuthMode === 'signup' ? '/api/auth/customer/signup' : '/api/auth/customer/login';
+    const payload = customerAuthMode === 'signup'
+      ? { name: customerName, phone: customerPhone, email: customerEmail, password: customerPassword }
+      : { email: customerEmail, password: customerPassword };
+
+    fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    })
+    .then(async r => {
+      const data = await r.json();
+      if (!r.ok || !data.success) {
+        throw new Error(data.error || 'Customer authentication failed.');
+      }
+      return data;
+    })
+    .then(data => {
+      setCustomerAccount(data.customer);
+      setCustomerName(data.customer?.name || '');
+      setCustomerPhone(data.customer?.phone || '');
+      setCustomerEmail(data.customer?.email || customerEmail);
+      setCustomerPassword('');
+      setOrders([]);
+      setReservations([]);
+      setActiveTab('call');
+      showToast(customerAuthMode === 'signup' ? 'Welcome to The Carnivore.' : 'Welcome back.');
+      if (customerAuthMode === 'signup' && data.welcomeEmail?.queued === false) {
+        console.warn('Welcome email was not queued:', data.welcomeEmail?.reason || data.welcomeEmail);
+      }
+    })
+    .catch(err => {
+      setCustomerAuthError(err.message || 'Customer authentication failed.');
+    })
+    .finally(() => setCustomerAuthLoading(false));
+  };
+
+  const handleCustomerLogout = () => {
+    fetch('/api/auth/customer/logout', { method: 'POST' })
+      .finally(() => {
+        setCustomerAccount(null);
+        setOrders([]);
+        setReservations([]);
+        setCustomerPassword('');
+        setActiveTab('call');
+        showToast('Signed out of your account.');
+      });
+  };
 
   // Filter call logs based on search term and status
   const filteredCallLogs = callLogs.filter(log => {
@@ -789,8 +873,194 @@ export default function App() {
         )}
       </AnimatePresence>
 
-      {/* 2. CUSTOMER VIEW MODULE */}
-      {role === 'customer' && (
+      {/* 2A. PUBLIC WELCOME / CUSTOMER AUTH MODULE */}
+      {role === 'customer' && !customerAccount && (
+        <div className="flex-1 min-h-screen bg-zinc-950 text-white relative overflow-hidden">
+          <div className="absolute inset-0 pointer-events-none">
+            <div className="absolute -top-32 -right-24 w-96 h-96 rounded-full bg-red-600/20 blur-3xl" />
+            <div className="absolute top-1/3 -left-28 w-96 h-96 rounded-full bg-amber-500/10 blur-3xl" />
+          </div>
+
+          <header className="relative z-10 border-b border-white/10 bg-zinc-950/80 backdrop-blur-md">
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <CarnivoreLogo className="w-11 h-11" />
+                <div>
+                  <h1 className="font-black text-sm tracking-tight leading-none">THE CARNIVORE</h1>
+                  <p className="text-[10px] text-red-200/70 font-bold mt-1 tracking-wider uppercase">AI voice concierge</p>
+                </div>
+              </div>
+
+              <button
+                onClick={() => setRole('owner')}
+                className="flex items-center gap-2 bg-white/10 hover:bg-white/15 border border-white/15 text-white text-xs font-bold px-3.5 py-2 rounded-xl transition-colors"
+              >
+                <ShieldCheck className="w-4 h-4" />
+                Admin Panel
+              </button>
+            </div>
+          </header>
+
+          <main className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 py-8 md:py-14 grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
+            <section className="lg:col-span-7 space-y-7">
+              <div className="space-y-4">
+                <span className="inline-flex items-center gap-2 bg-red-500/15 text-red-100 border border-red-400/20 px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-[0.18em]">
+                  <Sparkles className="w-3.5 h-3.5" />
+                  Premium baked meats, reservations, and AI ordering
+                </span>
+
+                <h2 className="text-4xl md:text-6xl font-black tracking-tight leading-[0.95]">
+                  Welcome to<br />
+                  <span className="text-red-400">The Carnivore</span>
+                </h2>
+
+                <p className="text-sm md:text-base text-zinc-300 leading-relaxed max-w-2xl font-medium">
+                  Order slow-baked lamb, beef, camel, chicken, desserts, and beverages with Zara, our AI voice concierge. Create your account to track your orders and table reservations anytime.
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 max-w-3xl">
+                {[
+                  { title: 'Talk to Zara', text: 'Place orders and book tables by voice.', icon: PhoneCall },
+                  { title: 'Track Records', text: 'View your own orders and reservations.', icon: LayoutGrid },
+                  { title: 'Fast Updates', text: 'Get confirmations and account history.', icon: Mail }
+                ].map((item) => {
+                  const Icon = item.icon;
+                  return (
+                    <div key={item.title} className="bg-white/8 border border-white/10 rounded-2xl p-4 backdrop-blur-sm">
+                      <Icon className="w-5 h-5 text-red-300 mb-3" />
+                      <h3 className="font-black text-sm">{item.title}</h3>
+                      <p className="text-xs text-zinc-400 mt-1 leading-relaxed">{item.text}</p>
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+
+            <section className="lg:col-span-5">
+              <div className="bg-white text-zinc-950 rounded-3xl p-5 md:p-7 shadow-2xl border border-white/20">
+                <div className="flex items-center justify-between gap-3 mb-5">
+                  <div>
+                    <h3 className="font-black text-xl tracking-tight">
+                      {customerAuthMode === 'signup' ? 'Create Customer Account' : 'Customer Login'}
+                    </h3>
+                    <p className="text-xs text-zinc-500 mt-1">
+                      {customerAuthMode === 'signup'
+                        ? 'Sign up once, then see your orders and reservations automatically.'
+                        : 'Log in to continue with Zara and view your restaurant records.'}
+                    </p>
+                  </div>
+                  {customerAuthMode === 'signup' ? (
+                    <UserPlus className="w-6 h-6 text-red-600" />
+                  ) : (
+                    <LogIn className="w-6 h-6 text-red-600" />
+                  )}
+                </div>
+
+                <div className="grid grid-cols-2 gap-2 bg-zinc-100 border border-zinc-200 rounded-2xl p-1 mb-5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCustomerAuthMode('signup');
+                      setCustomerAuthError('');
+                    }}
+                    className={`rounded-xl py-2 text-xs font-black transition-colors ${customerAuthMode === 'signup' ? 'bg-white shadow-sm text-red-600' : 'text-zinc-500 hover:text-zinc-900'}`}
+                  >
+                    Sign Up
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCustomerAuthMode('login');
+                      setCustomerAuthError('');
+                    }}
+                    className={`rounded-xl py-2 text-xs font-black transition-colors ${customerAuthMode === 'login' ? 'bg-white shadow-sm text-red-600' : 'text-zinc-500 hover:text-zinc-900'}`}
+                  >
+                    Login
+                  </button>
+                </div>
+
+                <form onSubmit={handleCustomerAuth} className="space-y-3.5">
+                  {customerAuthMode === 'signup' && (
+                    <>
+                      <div>
+                        <label className="text-[10px] font-black uppercase tracking-wider text-zinc-500 block mb-1">Full Name</label>
+                        <input
+                          type="text"
+                          required
+                          value={customerName}
+                          onChange={e => setCustomerName(e.target.value)}
+                          placeholder="Muhammad Khurram"
+                          className="w-full bg-zinc-50 border border-zinc-200 rounded-xl px-3.5 py-2.5 text-sm text-zinc-900 focus:outline-none focus:bg-white focus:border-red-200"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="text-[10px] font-black uppercase tracking-wider text-zinc-500 block mb-1">Phone Number</label>
+                        <input
+                          type="tel"
+                          required
+                          value={customerPhone}
+                          onChange={e => setCustomerPhone(e.target.value)}
+                          placeholder="0333 738 4752"
+                          className="w-full bg-zinc-50 border border-zinc-200 rounded-xl px-3.5 py-2.5 text-sm text-zinc-900 focus:outline-none focus:bg-white focus:border-red-200"
+                        />
+                      </div>
+                    </>
+                  )}
+
+                  <div>
+                    <label className="text-[10px] font-black uppercase tracking-wider text-zinc-500 block mb-1">Email Address</label>
+                    <input
+                      type="email"
+                      required
+                      value={customerEmail}
+                      onChange={e => setCustomerEmail(e.target.value)}
+                      placeholder="you@example.com"
+                      className="w-full bg-zinc-50 border border-zinc-200 rounded-xl px-3.5 py-2.5 text-sm text-zinc-900 focus:outline-none focus:bg-white focus:border-red-200"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] font-black uppercase tracking-wider text-zinc-500 block mb-1">Password</label>
+                    <input
+                      type="password"
+                      required
+                      minLength={8}
+                      value={customerPassword}
+                      onChange={e => setCustomerPassword(e.target.value)}
+                      placeholder="Minimum 8 characters"
+                      className="w-full bg-zinc-50 border border-zinc-200 rounded-xl px-3.5 py-2.5 text-sm text-zinc-900 focus:outline-none focus:bg-white focus:border-red-200"
+                    />
+                  </div>
+
+                  {customerAuthError && (
+                    <div className="p-3 bg-rose-50 border border-rose-100 rounded-xl text-xs text-rose-700 font-semibold flex items-start gap-2">
+                      <AlertCircle className="w-4 h-4 text-rose-500 flex-shrink-0 mt-0.5" />
+                      <span>{customerAuthError}</span>
+                    </div>
+                  )}
+
+                  <button
+                    type="submit"
+                    disabled={customerAuthLoading}
+                    className="w-full bg-red-600 hover:bg-red-500 disabled:bg-zinc-300 disabled:cursor-not-allowed text-white font-black py-3 rounded-xl text-sm transition-colors shadow-lg shadow-red-600/15"
+                  >
+                    {customerAuthLoading
+                      ? 'Please wait...'
+                      : customerAuthMode === 'signup'
+                        ? 'Create Account & Continue'
+                        : 'Login & Continue'}
+                  </button>
+                </form>
+              </div>
+            </section>
+          </main>
+        </div>
+      )}
+
+      {/* 2B. CUSTOMER VIEW MODULE */}
+      {role === 'customer' && customerAccount && (
         <div className="flex-1 flex flex-col pb-24 md:pb-10 relative overflow-hidden bg-zinc-50/40">
           
           {/* Floating animated background mesh blobs */}
@@ -836,6 +1106,20 @@ export default function App() {
 
               {/* Header Right toggles */}
               <div className="flex items-center gap-3">
+                <div className="hidden md:flex items-center gap-2 px-3 py-2 bg-zinc-100 border border-zinc-200 rounded-xl max-w-[260px]">
+                  <UserCircle className="w-4 h-4 text-zinc-500 flex-shrink-0" />
+                  <div className="min-w-0">
+                    <p className="text-[10px] font-black text-zinc-500 uppercase tracking-wider leading-none">Customer</p>
+                    <p className="text-xs font-bold text-zinc-800 truncate" title={customerAccount.email}>{customerAccount.name}</p>
+                  </div>
+                </div>
+                <button
+                  onClick={handleCustomerLogout}
+                  className="flex items-center gap-1.5 bg-white hover:bg-rose-50 text-rose-600 text-xs font-bold px-2.5 sm:px-3.5 py-2 rounded-xl transition-colors cursor-pointer border border-rose-100"
+                >
+                  <LogOut className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Logout</span>
+                </button>
                 <button
                   onClick={() => setRole('owner')}
                   className="flex items-center gap-1.5 bg-zinc-100 hover:bg-zinc-200 text-zinc-700 text-xs font-bold px-2.5 sm:px-3.5 py-2 rounded-xl transition-colors cursor-pointer border border-zinc-200/50"
@@ -934,6 +1218,7 @@ export default function App() {
                       onRecordCreated={handleCallRecordCreated} 
                       preSelectedAction={selectedVoiceAction}
                       onClearAction={() => setSelectedVoiceAction('')}
+                      customerAccount={customerAccount}
                     />
 
                     {/* Today's Gourmet Specials Grid */}

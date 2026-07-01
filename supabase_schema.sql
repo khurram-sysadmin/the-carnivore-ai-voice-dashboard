@@ -78,6 +78,24 @@ CREATE TABLE IF NOT EXISTS reservations (
 CREATE INDEX IF NOT EXISTS idx_reservations_customer_email ON reservations(customer_email);
 CREATE INDEX IF NOT EXISTS idx_reservations_customer_phone ON reservations(customer_phone);
 
+-- 3B. CUSTOMER_ACCOUNTS TABLE
+-- Used by the customer welcome/login page. Passwords are hashed server-side;
+-- never store plain-text customer passwords.
+CREATE TABLE IF NOT EXISTS customer_accounts (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    name TEXT NOT NULL,
+    phone TEXT NOT NULL,
+    email TEXT NOT NULL UNIQUE,
+    password_hash TEXT NOT NULL,
+    password_salt TEXT NOT NULL,
+    last_login_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_customer_accounts_email ON customer_accounts(email);
+CREATE INDEX IF NOT EXISTS idx_customer_accounts_phone ON customer_accounts(phone);
+
 -- 4. ORDER_EVENTS TABLE (Audit Trail)
 CREATE TABLE IF NOT EXISTS order_events (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -185,6 +203,7 @@ ON CONFLICT (item_name) DO UPDATE SET
 ALTER TABLE menu_items ENABLE ROW LEVEL SECURITY;
 ALTER TABLE orders ENABLE ROW LEVEL SECURITY;
 ALTER TABLE reservations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE customer_accounts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE order_events ENABLE ROW LEVEL SECURITY;
 ALTER TABLE reservation_events ENABLE ROW LEVEL SECURITY;
 ALTER TABLE feedback ENABLE ROW LEVEL SECURITY;
@@ -249,6 +268,10 @@ CREATE POLICY "Allow customer reservation modifications" ON reservations
 CREATE POLICY "Allow admin full access to reservations" ON reservations
     FOR ALL USING (auth.role() = 'service_role' OR auth.jwt() ->> 'email' LIKE '%admin%' OR auth.jwt() ->> 'email' = 'owner@thecarnivore.com');
 
+-- C2. Policies for CUSTOMER_ACCOUNTS
+-- Customer accounts are managed only by the secure backend using the service-role key.
+CREATE POLICY "Allow service role customer account access" ON customer_accounts
+    FOR ALL USING (auth.role() = 'service_role') WITH CHECK (auth.role() = 'service_role');
 
 -- D. Policies for EVENTS, FEEDBACK, ESCALATIONS (Admin-only readable/writeable, or customer insertable)
 CREATE POLICY "Allow admin read order events" ON order_events
@@ -289,4 +312,3 @@ CREATE POLICY "Allow public insert call logs" ON call_logs
 
 CREATE POLICY "Allow admin read call logs" ON call_logs
     FOR SELECT USING (auth.role() = 'service_role' OR auth.jwt() ->> 'email' LIKE '%admin%' OR auth.jwt() ->> 'email' = 'owner@thecarnivore.com');
-

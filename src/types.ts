@@ -125,3 +125,10 @@ export interface CallLog {
   status: 'COMPLETED' | 'ESCALATED' | 'FAILED';
   created_at: string;
 }
+
+export interface CustomerAccount {
+  id: string;
+  name: string;
+  phone: string;
+  email: string;
+}
