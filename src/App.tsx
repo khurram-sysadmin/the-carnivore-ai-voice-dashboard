@@ -991,7 +991,7 @@ export default function App() {
                 {[
                   { title: 'Voice Ordering', text: 'Choose menu items, weight, delivery type, and payment method.', icon: PhoneCall, accent: 'text-red-300 border-red-900/40 bg-red-950/25' },
                   { title: 'Customer History', text: 'Signed-in customers see their own orders and reservations.', icon: LayoutGrid, accent: 'text-amber-300 border-amber-900/40 bg-amber-950/20' },
-                  { title: 'Instant Confirmations', text: 'Orders and bookings sync with Supabase, Outlook email, Slack, and the dashboard.', icon: Mail, accent: 'text-sky-300 border-sky-900/40 bg-sky-950/20' },
+                  { title: 'Instant Confirmations', text: 'Orders and bookings sync with Supabase, company email, Slack, and the dashboard.', icon: Mail, accent: 'text-sky-300 border-sky-900/40 bg-sky-950/20' },
                   { title: 'Owner Access', text: 'Restaurant staff can review calls, escalations, feedback, and revenue.', icon: ShieldCheck, accent: 'text-emerald-300 border-emerald-900/40 bg-emerald-950/20' }
                 ].map((item, index) => {
                   const Icon = item.icon;
