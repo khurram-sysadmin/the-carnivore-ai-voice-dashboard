@@ -4,7 +4,7 @@ import {
   Sparkles, Phone, ShoppingBag, Calendar, ListCollapse, AlertTriangle, ShieldCheck, 
   Search, Filter, Plus, Check, RefreshCw, Star, MessageSquare, AlertCircle, Eye, 
   ArrowRight, LogIn, LogOut, ChevronRight, CheckCircle2, TrendingUp, DollarSign, Users, 
-  Clock, X, ChevronDown, UserCircle, LayoutGrid, PhoneCall, Play, Pause, Volume2, Cpu, Zap, ThumbsUp, Info, UserPlus, Mail
+  Clock, X, ChevronDown, UserCircle, LayoutGrid, PhoneCall, Play, Pause, Volume2, Cpu, Zap, ThumbsUp, Info, UserPlus, Mail, User, Lock
 } from 'lucide-react';
 
 import { Order, Reservation, MenuItem, ActivityEvent, FeedbackItem, EscalationItem, OrderStatus, ReservationStatus, CallLog, CustomerAccount } from './types';
@@ -852,7 +852,7 @@ export default function App() {
   }).sort((a, b) => new Date(b.raw_date).getTime() - new Date(a.raw_date).getTime());
 
   return (
-    <div id="app-root-container" className="min-h-screen bg-zinc-50 flex flex-col justify-between">
+    <div id="app-root-container" className="min-h-screen bg-zinc-50 flex flex-col justify-between overflow-x-hidden">
       
       {/* 1. Global Status / Toast notifications */}
       <AnimatePresence>
@@ -875,96 +875,183 @@ export default function App() {
 
       {/* 2A. PUBLIC WELCOME / CUSTOMER AUTH MODULE */}
       {role === 'customer' && !customerAccount && (
-        <div className="flex-1 min-h-screen bg-zinc-950 text-white relative overflow-hidden">
-          <div className="absolute inset-0 pointer-events-none">
-            <div className="absolute -top-32 -right-24 w-96 h-96 rounded-full bg-red-600/20 blur-3xl" />
-            <div className="absolute top-1/3 -left-28 w-96 h-96 rounded-full bg-amber-500/10 blur-3xl" />
-          </div>
+        <div className="flex-1 min-h-screen w-full max-w-full bg-[#050505] text-white relative overflow-x-hidden">
+          <div
+            className="absolute inset-0 pointer-events-none opacity-45"
+            style={{
+              backgroundImage:
+                'linear-gradient(rgba(255,255,255,0.045) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.045) 1px, transparent 1px)',
+              backgroundSize: '42px 42px'
+            }}
+          />
+          <motion.div
+            aria-hidden="true"
+            className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-red-500/70 to-transparent"
+            animate={{ opacity: [0.25, 0.85, 0.25], x: ['-18%', '18%', '-18%'] }}
+            transition={{ duration: 7, repeat: Infinity, ease: 'easeInOut' }}
+          />
+          <motion.div
+            aria-hidden="true"
+            className="absolute left-0 top-24 h-[520px] w-px bg-gradient-to-b from-transparent via-amber-500/45 to-transparent"
+            animate={{ opacity: [0.15, 0.6, 0.15], y: [-25, 25, -25] }}
+            transition={{ duration: 9, repeat: Infinity, ease: 'easeInOut' }}
+          />
 
-          <header className="relative z-10 border-b border-white/10 bg-zinc-950/80 backdrop-blur-md">
-            <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-between gap-4">
-              <div className="flex items-center gap-3">
-                <CarnivoreLogo className="w-11 h-11" />
-                <div>
-                  <h1 className="font-black text-sm tracking-tight leading-none">THE CARNIVORE</h1>
-                  <p className="text-[10px] text-red-200/70 font-bold mt-1 tracking-wider uppercase">AI voice concierge</p>
+          <header className="relative z-10 border-b border-white/10 bg-black/70 backdrop-blur-md">
+            <div className="w-full max-w-full lg:max-w-7xl lg:mx-auto px-4 sm:px-6 py-4 flex items-center justify-between gap-3 sm:gap-4 min-w-0 overflow-hidden">
+              <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
+                <div className="relative">
+                  <div className="absolute inset-0 rounded-2xl border border-red-500/30 animate-pulse" />
+                  <CarnivoreLogo className="relative w-10 h-10 sm:w-11 sm:h-11 bg-zinc-950 rounded-2xl p-1.5 border border-zinc-800" />
+                </div>
+                <div className="min-w-0">
+                  <h1 className="font-black text-xs sm:text-sm tracking-widest leading-none truncate max-w-[170px] sm:max-w-none">THE CARNIVORE</h1>
+                  <div className="flex items-center gap-1.5 mt-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                    <p className="text-[9px] sm:text-[10px] text-zinc-400 font-bold tracking-wider uppercase truncate">Zara is online</p>
+                  </div>
                 </div>
               </div>
 
               <button
                 onClick={() => setRole('owner')}
-                className="flex items-center gap-2 bg-white/10 hover:bg-white/15 border border-white/15 text-white text-xs font-bold px-3.5 py-2 rounded-xl transition-colors"
+                className="group flex items-center justify-center gap-1.5 sm:gap-2 bg-zinc-900/90 hover:bg-zinc-800 border border-zinc-800 hover:border-red-900/50 text-zinc-200 text-xs font-bold w-10 sm:w-auto px-0 sm:px-3.5 py-2 rounded-xl transition-all shadow-lg flex-shrink-0"
+                aria-label="Open admin panel"
               >
-                <ShieldCheck className="w-4 h-4" />
-                Admin Panel
+                <ShieldCheck className="w-4 h-4 text-red-400 group-hover:scale-110 transition-transform" />
+                <span className="hidden sm:inline">Admin Panel</span>
               </button>
             </div>
           </header>
 
-          <main className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 py-8 md:py-14 grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
-            <section className="lg:col-span-7 space-y-7">
-              <div className="space-y-4">
-                <span className="inline-flex items-center gap-2 bg-red-500/15 text-red-100 border border-red-400/20 px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-[0.18em]">
-                  <Sparkles className="w-3.5 h-3.5" />
-                  Premium baked meats, reservations, and AI ordering
-                </span>
+          <main className="relative z-10 w-full max-w-[100vw] lg:max-w-7xl mx-auto px-4 sm:px-6 py-8 md:py-14 grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12 items-center overflow-hidden">
+            <section className="lg:col-span-7 space-y-7 min-w-0 w-full max-w-full">
+              <motion.div
+                initial={{ opacity: 0, y: 14 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.45 }}
+                className="inline-flex max-w-full items-center gap-2 bg-zinc-900/80 text-red-200 border border-red-900/35 px-3 py-2 rounded-2xl sm:rounded-full text-[9px] sm:text-[10px] font-black uppercase tracking-[0.12em] sm:tracking-[0.18em] leading-relaxed"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                Premium meats, reservations, and AI ordering
+              </motion.div>
 
-                <h2 className="text-4xl md:text-6xl font-black tracking-tight leading-[0.95]">
+              <div className="space-y-5">
+                <motion.h2
+                  initial={{ opacity: 0, y: 18 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.55, delay: 0.08 }}
+                  className="text-4xl sm:text-5xl lg:text-6xl font-black tracking-tight leading-[0.98]"
+                >
                   Welcome to<br />
-                  <span className="text-red-400">The Carnivore</span>
-                </h2>
+                  <span className="bg-gradient-to-r from-red-400 via-red-500 to-amber-400 bg-clip-text text-transparent">
+                    The Carnivore
+                  </span>
+                </motion.h2>
 
-                <p className="text-sm md:text-base text-zinc-300 leading-relaxed max-w-2xl font-medium">
-                  Order slow-baked lamb, beef, camel, chicken, desserts, and beverages with Zara, our AI voice concierge. Create your account to track your orders and table reservations anytime.
-                </p>
+                <motion.p
+                  initial={{ opacity: 0, y: 14 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.55, delay: 0.16 }}
+                  className="text-sm md:text-base text-zinc-300 leading-relaxed max-w-full lg:max-w-2xl font-medium break-words whitespace-normal"
+                >
+                  Order slow-baked lamb, beef, camel, chicken, desserts, and beverages with Zara, our AI restaurant concierge. Create an account to keep your orders and table reservations in one place.
+                </motion.p>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 max-w-3xl">
+              <motion.div
+                initial={{ opacity: 0, scale: 0.98 }}
+                animate={{ opacity: 1, scale: 1 }}
+                transition={{ duration: 0.55, delay: 0.22 }}
+                className="w-full max-w-full lg:max-w-2xl bg-zinc-950/80 border border-zinc-900 rounded-2xl p-4 sm:p-5 shadow-2xl flex flex-col sm:flex-row sm:items-center gap-4"
+              >
+                <div className="h-16 w-full sm:w-28 bg-black/80 border border-zinc-800 rounded-xl flex items-center justify-center gap-1.5 overflow-hidden">
+                  {[12, 30, 18, 42, 24, 36, 16, 28].map((height, index) => (
+                    <motion.span
+                      key={index}
+                      className="w-1 rounded-full bg-gradient-to-t from-red-600 to-amber-400"
+                      animate={{ height: [height, Math.max(12, height - 10), height + 8, height] }}
+                      transition={{ duration: 1 + index * 0.08, repeat: Infinity, ease: 'easeInOut' }}
+                    />
+                  ))}
+                </div>
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                    <span className="text-[10px] font-black tracking-wider uppercase text-emerald-300">Voice concierge active</span>
+                  </div>
+                  <h3 className="text-sm font-black text-white mt-1">Talk to Zara after login</h3>
+                  <p className="text-xs text-zinc-400 mt-0.5 leading-relaxed">
+                    Zara can place orders, book tables, handle changes, collect feedback, and send urgent manager requests to the admin panel.
+                  </p>
+                </div>
+              </motion.div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full max-w-full lg:max-w-2xl">
                 {[
-                  { title: 'Talk to Zara', text: 'Place orders and book tables by voice.', icon: PhoneCall },
-                  { title: 'Track Records', text: 'View your own orders and reservations.', icon: LayoutGrid },
-                  { title: 'Fast Updates', text: 'Get confirmations and account history.', icon: Mail }
-                ].map((item) => {
+                  { title: 'Voice Ordering', text: 'Choose menu items, weight, delivery type, and payment method.', icon: PhoneCall, accent: 'text-red-300 border-red-900/40 bg-red-950/25' },
+                  { title: 'Customer History', text: 'Signed-in customers see their own orders and reservations.', icon: LayoutGrid, accent: 'text-amber-300 border-amber-900/40 bg-amber-950/20' },
+                  { title: 'Instant Confirmations', text: 'Orders and bookings sync with Supabase, Gmail, Slack, and the dashboard.', icon: Mail, accent: 'text-sky-300 border-sky-900/40 bg-sky-950/20' },
+                  { title: 'Owner Access', text: 'Restaurant staff can review calls, escalations, feedback, and revenue.', icon: ShieldCheck, accent: 'text-emerald-300 border-emerald-900/40 bg-emerald-950/20' }
+                ].map((item, index) => {
                   const Icon = item.icon;
                   return (
-                    <div key={item.title} className="bg-white/8 border border-white/10 rounded-2xl p-4 backdrop-blur-sm">
-                      <Icon className="w-5 h-5 text-red-300 mb-3" />
-                      <h3 className="font-black text-sm">{item.title}</h3>
-                      <p className="text-xs text-zinc-400 mt-1 leading-relaxed">{item.text}</p>
-                    </div>
+                    <motion.div
+                      key={item.title}
+                      initial={{ opacity: 0, y: 12 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ duration: 0.35, delay: 0.28 + index * 0.06 }}
+                      className="group bg-zinc-950/55 hover:bg-zinc-950/85 border border-zinc-900 hover:border-zinc-700 rounded-2xl p-4 backdrop-blur-sm transition-all min-w-0"
+                    >
+                      <div className={`inline-flex p-2 rounded-xl border ${item.accent}`}>
+                        <Icon className="w-4 h-4" />
+                      </div>
+                      <h3 className="font-black text-sm mt-3 text-white">{item.title}</h3>
+                      <p className="text-xs text-zinc-400 mt-1 leading-relaxed break-words">{item.text}</p>
+                    </motion.div>
                   );
                 })}
               </div>
             </section>
 
-            <section className="lg:col-span-5">
-              <div className="bg-white text-zinc-950 rounded-3xl p-5 md:p-7 shadow-2xl border border-white/20">
-                <div className="flex items-center justify-between gap-3 mb-5">
+            <section className="lg:col-span-5 w-full min-w-0">
+              <motion.div
+                initial={{ opacity: 0, y: 22, scale: 0.98 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                transition={{ duration: 0.55, delay: 0.12 }}
+                className="w-full max-w-md mx-auto bg-zinc-950/90 text-white rounded-3xl p-5 md:p-7 shadow-2xl border border-zinc-800 relative overflow-hidden"
+              >
+                <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-red-500/70 to-transparent" />
+
+                <div className="flex items-center justify-between gap-3 mb-6">
                   <div>
+                    <p className="text-[10px] font-black uppercase tracking-[0.22em] text-red-300 mb-2">Customer Access</p>
                     <h3 className="font-black text-xl tracking-tight">
                       {customerAuthMode === 'signup' ? 'Create Customer Account' : 'Customer Login'}
                     </h3>
-                    <p className="text-xs text-zinc-500 mt-1">
+                    <p className="text-xs text-zinc-400 mt-1 leading-relaxed">
                       {customerAuthMode === 'signup'
-                        ? 'Sign up once, then see your orders and reservations automatically.'
-                        : 'Log in to continue with Zara and view your restaurant records.'}
+                        ? 'Sign up once, then talk to Zara and track restaurant records.'
+                        : 'Log in to continue with Zara and view your restaurant history.'}
                     </p>
                   </div>
-                  {customerAuthMode === 'signup' ? (
-                    <UserPlus className="w-6 h-6 text-red-600" />
-                  ) : (
-                    <LogIn className="w-6 h-6 text-red-600" />
-                  )}
+                  <div className="w-11 h-11 rounded-2xl bg-red-950/40 border border-red-900/45 flex items-center justify-center">
+                    {customerAuthMode === 'signup' ? (
+                      <UserPlus className="w-5 h-5 text-red-300" />
+                    ) : (
+                      <LogIn className="w-5 h-5 text-red-300" />
+                    )}
+                  </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-2 bg-zinc-100 border border-zinc-200 rounded-2xl p-1 mb-5">
+                <div className="relative grid grid-cols-2 gap-1 bg-black/70 border border-zinc-800 rounded-2xl p-1 mb-6">
                   <button
                     type="button"
                     onClick={() => {
                       setCustomerAuthMode('signup');
                       setCustomerAuthError('');
                     }}
-                    className={`rounded-xl py-2 text-xs font-black transition-colors ${customerAuthMode === 'signup' ? 'bg-white shadow-sm text-red-600' : 'text-zinc-500 hover:text-zinc-900'}`}
+                    className={`rounded-xl py-2.5 text-xs font-black transition-colors ${customerAuthMode === 'signup' ? 'bg-red-600 text-white shadow-lg shadow-red-950/30' : 'text-zinc-400 hover:text-white'}`}
                   >
                     Sign Up
                   </button>
@@ -974,88 +1061,119 @@ export default function App() {
                       setCustomerAuthMode('login');
                       setCustomerAuthError('');
                     }}
-                    className={`rounded-xl py-2 text-xs font-black transition-colors ${customerAuthMode === 'login' ? 'bg-white shadow-sm text-red-600' : 'text-zinc-500 hover:text-zinc-900'}`}
+                    className={`rounded-xl py-2.5 text-xs font-black transition-colors ${customerAuthMode === 'login' ? 'bg-red-600 text-white shadow-lg shadow-red-950/30' : 'text-zinc-400 hover:text-white'}`}
                   >
                     Login
                   </button>
                 </div>
 
-                <form onSubmit={handleCustomerAuth} className="space-y-3.5">
+                <form onSubmit={handleCustomerAuth} className="space-y-4">
                   {customerAuthMode === 'signup' && (
                     <>
                       <div>
-                        <label className="text-[10px] font-black uppercase tracking-wider text-zinc-500 block mb-1">Full Name</label>
-                        <input
-                          type="text"
-                          required
-                          value={customerName}
-                          onChange={e => setCustomerName(e.target.value)}
-                          placeholder="Muhammad Khurram"
-                          className="w-full bg-zinc-50 border border-zinc-200 rounded-xl px-3.5 py-2.5 text-sm text-zinc-900 focus:outline-none focus:bg-white focus:border-red-200"
-                        />
+                        <label className="text-[10px] font-black uppercase tracking-wider text-zinc-400 block mb-1.5">Full Name</label>
+                        <div className="relative">
+                          <User className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
+                          <input
+                            type="text"
+                            required
+                            value={customerName}
+                            onChange={e => setCustomerName(e.target.value)}
+                            placeholder="Muhammad Khurram"
+                            className="w-full bg-black/70 border border-zinc-800 rounded-xl pl-10 pr-4 py-3 text-sm text-white placeholder-zinc-500 focus:outline-none focus:bg-black focus:border-red-500 focus:ring-1 focus:ring-red-500/40"
+                          />
+                        </div>
                       </div>
 
                       <div>
-                        <label className="text-[10px] font-black uppercase tracking-wider text-zinc-500 block mb-1">Phone Number</label>
-                        <input
-                          type="tel"
-                          required
-                          value={customerPhone}
-                          onChange={e => setCustomerPhone(e.target.value)}
-                          placeholder="0333 738 4752"
-                          className="w-full bg-zinc-50 border border-zinc-200 rounded-xl px-3.5 py-2.5 text-sm text-zinc-900 focus:outline-none focus:bg-white focus:border-red-200"
-                        />
+                        <label className="text-[10px] font-black uppercase tracking-wider text-zinc-400 block mb-1.5">Phone Number</label>
+                        <div className="relative">
+                          <Phone className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
+                          <input
+                            type="tel"
+                            required
+                            value={customerPhone}
+                            onChange={e => setCustomerPhone(e.target.value)}
+                            placeholder="0333 738 4752"
+                            className="w-full bg-black/70 border border-zinc-800 rounded-xl pl-10 pr-4 py-3 text-sm text-white placeholder-zinc-500 focus:outline-none focus:bg-black focus:border-red-500 focus:ring-1 focus:ring-red-500/40"
+                          />
+                        </div>
                       </div>
                     </>
                   )}
 
                   <div>
-                    <label className="text-[10px] font-black uppercase tracking-wider text-zinc-500 block mb-1">Email Address</label>
-                    <input
-                      type="email"
-                      required
-                      value={customerEmail}
-                      onChange={e => setCustomerEmail(e.target.value)}
-                      placeholder="you@example.com"
-                      className="w-full bg-zinc-50 border border-zinc-200 rounded-xl px-3.5 py-2.5 text-sm text-zinc-900 focus:outline-none focus:bg-white focus:border-red-200"
-                    />
+                    <label className="text-[10px] font-black uppercase tracking-wider text-zinc-400 block mb-1.5">Email Address</label>
+                    <div className="relative">
+                      <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
+                      <input
+                        type="email"
+                        required
+                        value={customerEmail}
+                        onChange={e => setCustomerEmail(e.target.value)}
+                        placeholder="you@example.com"
+                        className="w-full bg-black/70 border border-zinc-800 rounded-xl pl-10 pr-4 py-3 text-sm text-white placeholder-zinc-500 focus:outline-none focus:bg-black focus:border-red-500 focus:ring-1 focus:ring-red-500/40"
+                      />
+                    </div>
                   </div>
 
                   <div>
-                    <label className="text-[10px] font-black uppercase tracking-wider text-zinc-500 block mb-1">Password</label>
-                    <input
-                      type="password"
-                      required
-                      minLength={8}
-                      value={customerPassword}
-                      onChange={e => setCustomerPassword(e.target.value)}
-                      placeholder="Minimum 8 characters"
-                      className="w-full bg-zinc-50 border border-zinc-200 rounded-xl px-3.5 py-2.5 text-sm text-zinc-900 focus:outline-none focus:bg-white focus:border-red-200"
-                    />
+                    <label className="text-[10px] font-black uppercase tracking-wider text-zinc-400 block mb-1.5">Password</label>
+                    <div className="relative">
+                      <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
+                      <input
+                        type="password"
+                        required
+                        minLength={8}
+                        value={customerPassword}
+                        onChange={e => setCustomerPassword(e.target.value)}
+                        placeholder="Minimum 8 characters"
+                        className="w-full bg-black/70 border border-zinc-800 rounded-xl pl-10 pr-4 py-3 text-sm text-white placeholder-zinc-500 focus:outline-none focus:bg-black focus:border-red-500 focus:ring-1 focus:ring-red-500/40"
+                      />
+                    </div>
                   </div>
 
                   {customerAuthError && (
-                    <div className="p-3 bg-rose-50 border border-rose-100 rounded-xl text-xs text-rose-700 font-semibold flex items-start gap-2">
-                      <AlertCircle className="w-4 h-4 text-rose-500 flex-shrink-0 mt-0.5" />
+                    <motion.div
+                      initial={{ opacity: 0, y: -8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="p-3 bg-rose-950/45 border border-rose-900/55 rounded-xl text-xs text-rose-200 font-semibold flex items-start gap-2"
+                    >
+                      <AlertCircle className="w-4 h-4 text-rose-300 flex-shrink-0 mt-0.5" />
                       <span>{customerAuthError}</span>
-                    </div>
+                    </motion.div>
                   )}
 
                   <button
                     type="submit"
                     disabled={customerAuthLoading}
-                    className="w-full bg-red-600 hover:bg-red-500 disabled:bg-zinc-300 disabled:cursor-not-allowed text-white font-black py-3 rounded-xl text-sm transition-colors shadow-lg shadow-red-600/15"
+                    className="w-full group bg-gradient-to-r from-red-700 via-red-600 to-amber-600 hover:from-red-600 hover:to-amber-500 disabled:from-zinc-700 disabled:to-zinc-700 disabled:cursor-not-allowed text-white font-black py-3.5 rounded-xl text-sm transition-all shadow-lg shadow-red-950/25 flex items-center justify-center gap-2"
                   >
-                    {customerAuthLoading
-                      ? 'Please wait...'
-                      : customerAuthMode === 'signup'
-                        ? 'Create Account & Continue'
-                        : 'Login & Continue'}
+                    {customerAuthLoading ? (
+                      <>
+                        <RefreshCw className="w-4 h-4 animate-spin" />
+                        <span>Please wait...</span>
+                      </>
+                    ) : (
+                      <>
+                        <span>{customerAuthMode === 'signup' ? 'Create Account & Continue' : 'Login & Continue'}</span>
+                        <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+                      </>
+                    )}
                   </button>
                 </form>
-              </div>
+
+                <div className="mt-6 pt-5 border-t border-zinc-900 flex items-center justify-between gap-3 text-[9px] text-zinc-500 font-bold uppercase tracking-wider">
+                  <span>Secure customer portal</span>
+                  <span>Zara AI Concierge</span>
+                </div>
+              </motion.div>
             </section>
           </main>
+
+          <footer className="relative z-10 border-t border-zinc-900 bg-black/70 py-5 text-center text-xs text-zinc-500 px-4">
+            <p>The Carnivore Restaurant. Powered by Zara AI Concierge.</p>
+          </footer>
         </div>
       )}
 
