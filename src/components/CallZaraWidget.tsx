@@ -603,14 +603,14 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
     isCallLogSaved.current = false;
 
     try {
-      // 1. Fetch signed URL or public Agent ID from our secure backend endpoint.
+      // 1. Fetch a WebRTC conversation token or public Agent ID from our secure backend endpoint.
       const res = await fetch('/api/elevenlabs/session');
       if (!res.ok) {
         throw new Error("ElevenLabs is not configured. Please add ELEVENLABS_AGENT_ID and ELEVENLABS_API_KEY in the backend environment.");
       }
       const data = await res.json();
 
-      if (data.error || (!data.agentId && !data.signedUrl)) {
+      if (data.error || (!data.agentId && !data.signedUrl && !data.conversationToken)) {
         throw new Error("ElevenLabs is not configured. Please add ELEVENLABS_AGENT_ID and ELEVENLABS_API_KEY in the backend environment.");
       }
 
@@ -618,15 +618,23 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
       sessionAgentIdRef.current = data.agentId || '';
 
       // 2. Initiate the conversational session. The ElevenLabs SDK owns microphone capture.
-      if (data.signedUrl) {
-        // Authenticated flow using secure signed URL
+      if (data.conversationToken) {
+        // Authenticated low-latency flow using secure WebRTC token.
         await conversation.startSession({
-          signedUrl: data.signedUrl
+          conversationToken: data.conversationToken,
+          connectionType: 'webrtc'
+        });
+      } else if (data.signedUrl) {
+        // Signed URLs only support websocket in the current ElevenLabs SDK.
+        await conversation.startSession({
+          signedUrl: data.signedUrl,
+          connectionType: 'websocket'
         });
       } else {
-        // Public flow using agentId
+        // Public flow using agentId. The SDK fetches a token and uses WebRTC for voice.
         await conversation.startSession({
-          agentId: data.agentId
+          agentId: data.agentId,
+          connectionType: 'webrtc'
         });
       }
     } catch (error: any) {
@@ -769,11 +777,17 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
       const response = await fetch('/api/elevenlabs/session');
       const data = await response.json().catch(() => ({}));
 
-      if (!response.ok || data.error || (!data.agentId && !data.signedUrl)) {
+      if (!response.ok || data.error || (!data.agentId && !data.signedUrl && !data.conversationToken)) {
         throw new Error(data.error || 'ElevenLabs Zara chat is not configured on the server.');
       }
 
-      if (data.signedUrl) {
+      if (data.conversationToken) {
+        conversation.startSession({
+          conversationToken: data.conversationToken,
+          textOnly: true,
+          connectionType: 'webrtc'
+        });
+      } else if (data.signedUrl) {
         conversation.startSession({
           signedUrl: data.signedUrl,
           textOnly: true,

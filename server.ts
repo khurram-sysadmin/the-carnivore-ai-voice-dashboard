@@ -1072,24 +1072,42 @@ app.get("/api/elevenlabs/session", async (req, res) => {
 
   if (apiKey && apiKey !== "your-elevenlabs-api-key") {
     try {
-      console.log(`Requesting signed session URL from ElevenLabs for agent: ${agentId}`);
-      const response = await fetch(`https://api.elevenlabs.io/v1/convai/conversation/get_signed_url?agent_id=${agentId}`, {
+      console.log(`Requesting WebRTC conversation token from ElevenLabs for agent: ${agentId}`);
+      const tokenResponse = await fetch(`https://api.elevenlabs.io/v1/convai/conversation/token?agent_id=${encodeURIComponent(agentId)}`, {
         method: "GET",
         headers: {
           "xi-api-key": apiKey
         }
       });
-      if (response.ok) {
-        const data = await response.json();
-        return res.json({ signedUrl: data.signed_url, agentId });
-      } else {
-        const errText = await response.text();
-        console.error("ElevenLabs API error getting signed URL:", errText);
-        return res.status(500).json({ error: "Failed to fetch signed URL from ElevenLabs: " + errText, agentId });
+
+      if (tokenResponse.ok) {
+        const data = await tokenResponse.json();
+        if (data.token) {
+          return res.json({ conversationToken: data.token, agentId, connectionType: "webrtc" });
+        }
       }
+
+      const tokenError = await tokenResponse.text();
+      console.warn("ElevenLabs token endpoint failed; falling back to signed websocket URL:", tokenError);
+
+      const signedResponse = await fetch(`https://api.elevenlabs.io/v1/convai/conversation/get_signed_url?agent_id=${encodeURIComponent(agentId)}`, {
+        method: "GET",
+        headers: {
+          "xi-api-key": apiKey
+        }
+      });
+
+      if (signedResponse.ok) {
+        const data = await signedResponse.json();
+        return res.json({ signedUrl: data.signed_url, agentId, connectionType: "websocket" });
+      }
+
+      const signedError = await signedResponse.text();
+      console.error("ElevenLabs API error getting session credentials:", signedError);
+      return res.status(500).json({ error: "Failed to fetch ElevenLabs session credentials: " + signedError, agentId });
     } catch (e) {
-      console.error("Failed to fetch signed URL from ElevenLabs:", e);
-      return res.status(500).json({ error: "Network error requesting signed URL from ElevenLabs.", agentId });
+      console.error("Failed to fetch ElevenLabs session credentials:", e);
+      return res.status(500).json({ error: "Network error requesting ElevenLabs session credentials.", agentId });
     }
   }
 
