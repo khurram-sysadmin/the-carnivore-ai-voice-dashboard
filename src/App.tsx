@@ -394,8 +394,8 @@ export default function App() {
         setCustomerAccount(null);
         setCustomerPassword('');
         setCustomerAuthMode('login');
-        setCustomerAuthNotice(`We sent a verification link to ${emailToVerify}. Open that email to activate your account and log in.`);
-        showToast('Verification email sent. Please check your inbox.');
+        setCustomerAuthNotice(`We sent a verification link to ${emailToVerify}. Open that email to activate your account and log in. If it is not in your inbox, please check your spam or junk folder.`);
+        showToast('Verification email sent. Please check your inbox or spam folder.');
         return;
       }
 
@@ -1110,7 +1110,7 @@ export default function App() {
                             required
                             value={customerName}
                             onChange={e => setCustomerName(e.target.value)}
-                            placeholder="Muhammad Khurram"
+                            placeholder="Your full name"
                             className="w-full bg-black/70 border border-zinc-800 rounded-xl pl-10 pr-4 py-3 text-sm text-white placeholder-zinc-500 focus:outline-none focus:bg-black focus:border-red-500 focus:ring-1 focus:ring-red-500/40"
                           />
                         </div>
@@ -1125,7 +1125,7 @@ export default function App() {
                             required
                             value={customerPhone}
                             onChange={e => setCustomerPhone(e.target.value)}
-                            placeholder="0333 738 4752"
+                            placeholder="Your phone number"
                             className="w-full bg-black/70 border border-zinc-800 rounded-xl pl-10 pr-4 py-3 text-sm text-white placeholder-zinc-500 focus:outline-none focus:bg-black focus:border-red-500 focus:ring-1 focus:ring-red-500/40"
                           />
                         </div>

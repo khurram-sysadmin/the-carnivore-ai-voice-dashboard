@@ -718,6 +718,7 @@ const buildCustomerVerificationEmailHtml = (account: any, verificationUrl: strin
         <p style="margin:28px 0;">
           <a href="${verificationUrl}" style="background:#dc2626;color:#ffffff;text-decoration:none;padding:14px 22px;border-radius:12px;font-weight:700;display:inline-block;">Verify Email & Login</a>
         </p>
+        <p style="font-size:13px;line-height:1.6;color:#52525b;margin:0 0 12px;">If you do not see this email in your inbox, please check your spam or junk folder.</p>
         <p style="font-size:12px;line-height:1.6;color:#71717a;margin:0 0 12px;">This link expires in 1 hour. If the button does not work, copy and paste this URL into your browser:</p>
         <p style="font-size:12px;line-height:1.6;color:#52525b;word-break:break-all;margin:0;">${verificationUrl}</p>
       </div>
