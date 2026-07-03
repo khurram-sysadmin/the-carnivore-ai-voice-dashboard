@@ -229,6 +229,41 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
     }));
   }, [customerAccount?.name, customerAccount?.phone, customerAccount?.email]);
 
+  const hasLoggedInCustomerDetails = Boolean(customerAccount?.phone && customerAccount?.email);
+
+  const getCustomerSessionOptions = () => ({
+    userId: customerAccount?.email || customerAccount?.phone || undefined,
+    dynamicVariables: {
+      source_channel: 'web_app',
+      customer_is_logged_in: Boolean(customerAccount),
+      customer_has_saved_contact: hasLoggedInCustomerDetails,
+      customer_name: customerAccount?.name || '',
+      customer_phone: customerAccount?.phone || '',
+      customer_email: customerAccount?.email || ''
+    }
+  });
+
+  const sendLoggedInCustomerContext = () => {
+    if (!customerAccount) return;
+
+    const contextLines = [
+      'This is a web app session.',
+      `Customer logged in: ${hasLoggedInCustomerDetails ? 'yes' : 'partial profile'}.`,
+      customerAccount.name ? `Account name: ${customerAccount.name}` : '',
+      customerAccount.phone ? `Account phone: ${customerAccount.phone}` : '',
+      customerAccount.email ? `Account email: ${customerAccount.email}` : '',
+      hasLoggedInCustomerDetails
+        ? 'Use the account phone and email automatically for orders and reservations. Do not ask for phone or email again.'
+        : 'If phone or email is missing, ask for only the missing contact detail.'
+    ].filter(Boolean).join('\n');
+
+    try {
+      voiceConversationRef.current?.sendContextualUpdate(contextLines);
+    } catch (err) {
+      console.warn('Could not send logged-in customer context to Zara:', err);
+    }
+  };
+
   // Clean up UI animation resources when conversation ends or unmounts.
   const cleanupAudioVisualizer = () => {
     if (animationFrameRef.current) {
@@ -252,6 +287,7 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
 
       if (sessionModeRef.current === 'chat') {
         setChatSessionState('connected');
+        sendLoggedInCustomerContext();
         const pendingMessage = pendingChatMessageRef.current;
         if (pendingMessage) {
           pendingChatMessageRef.current = null;
@@ -277,6 +313,7 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
       setDetailsFormVisible(false);
       setDetailsSent(false);
       setCallState({ status: 'active', message: 'Connected to Voice Agent Zara' });
+      sendLoggedInCustomerContext();
     },
     onDisconnect: () => {
       console.log("ElevenLabs Disconnected.", sessionModeRef.current);
@@ -622,19 +659,22 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
         // Authenticated low-latency flow using secure WebRTC token.
         await conversation.startSession({
           conversationToken: data.conversationToken,
-          connectionType: 'webrtc'
+          connectionType: 'webrtc',
+          ...getCustomerSessionOptions()
         });
       } else if (data.signedUrl) {
         // Signed URLs only support websocket in the current ElevenLabs SDK.
         await conversation.startSession({
           signedUrl: data.signedUrl,
-          connectionType: 'websocket'
+          connectionType: 'websocket',
+          ...getCustomerSessionOptions()
         });
       } else {
         // Public flow using agentId. The SDK fetches a token and uses WebRTC for voice.
         await conversation.startSession({
           agentId: data.agentId,
-          connectionType: 'webrtc'
+          connectionType: 'webrtc',
+          ...getCustomerSessionOptions()
         });
       }
     } catch (error: any) {
@@ -785,19 +825,22 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
         conversation.startSession({
           conversationToken: data.conversationToken,
           textOnly: true,
-          connectionType: 'webrtc'
+          connectionType: 'webrtc',
+          ...getCustomerSessionOptions()
         });
       } else if (data.signedUrl) {
         conversation.startSession({
           signedUrl: data.signedUrl,
           textOnly: true,
-          connectionType: 'websocket'
+          connectionType: 'websocket',
+          ...getCustomerSessionOptions()
         });
       } else {
         conversation.startSession({
           agentId: data.agentId,
           textOnly: true,
-          connectionType: 'websocket'
+          connectionType: 'websocket',
+          ...getCustomerSessionOptions()
         });
       }
     } catch (err: any) {
