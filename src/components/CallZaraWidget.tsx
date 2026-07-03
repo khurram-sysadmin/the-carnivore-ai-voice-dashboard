@@ -217,6 +217,7 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
   const pendingChatMessageRef = useRef<string | null>(null);
   const conversationIdRef = useRef<string>('');
   const sessionAgentIdRef = useRef<string>('');
+  const accountDetailsAutoSentRef = useRef<{ contact: boolean; callback: boolean }>({ contact: false, callback: false });
 
   const animationFrameRef = useRef<number | null>(null);
 
@@ -229,19 +230,59 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
     }));
   }, [customerAccount?.name, customerAccount?.phone, customerAccount?.email]);
 
-  const hasLoggedInCustomerDetails = Boolean(customerAccount?.phone && customerAccount?.email);
+  const savedCustomerName = customerAccount?.name?.trim() || '';
+  const savedCustomerPhone = customerAccount?.phone?.trim() || '';
+  const savedCustomerEmail = customerAccount?.email?.trim() || '';
+  const hasLoggedInCustomerDetails = Boolean(savedCustomerPhone && savedCustomerEmail);
+  const hasLoggedInCallbackDetails = Boolean(savedCustomerName && savedCustomerPhone);
 
   const getCustomerSessionOptions = () => ({
-    userId: customerAccount?.email || customerAccount?.phone || undefined,
+    userId: savedCustomerEmail || savedCustomerPhone || undefined,
     dynamicVariables: {
       source_channel: 'web_app',
       customer_is_logged_in: Boolean(customerAccount),
       customer_has_saved_contact: hasLoggedInCustomerDetails,
-      customer_name: customerAccount?.name || '',
-      customer_phone: customerAccount?.phone || '',
-      customer_email: customerAccount?.email || ''
+      customer_name: savedCustomerName,
+      customer_phone: savedCustomerPhone,
+      customer_email: savedCustomerEmail
     }
   });
+
+  const sendSavedAccountDetailsToZara = (mode: 'contact' | 'callback') => {
+    const canUseSavedDetails = mode === 'callback' ? hasLoggedInCallbackDetails : hasLoggedInCustomerDetails;
+    if (!canUseSavedDetails) return false;
+    if (accountDetailsAutoSentRef.current[mode]) {
+      setDetailsFormVisible(false);
+      return true;
+    }
+
+    const detailText = mode === 'callback'
+      ? `Name: ${savedCustomerName}\nPhone: ${savedCustomerPhone}`
+      : `Name: ${savedCustomerName || 'Account customer'}\nPhone: ${savedCustomerPhone}\nEmail: ${savedCustomerEmail}`;
+
+    const message = mode === 'callback'
+      ? `The logged-in web app account already has the manager callback details. Use these typed account values exactly. Do not ask for name, phone, email, or address again.\n${detailText}`
+      : `The logged-in web app account already has verified contact details. Use these account values exactly for this task. Do not ask for name, phone, or email again.\n${detailText}`;
+
+    try {
+      voiceConversationRef.current?.sendUserMessage(message);
+      accountDetailsAutoSentRef.current = {
+        ...accountDetailsAutoSentRef.current,
+        [mode]: true
+      };
+      setDetailsFormMode(mode);
+      setDetailsFormVisible(false);
+      setDetailsSent(true);
+      setTranscript(prev => [
+        ...prev,
+        { speaker: 'You', text: mode === 'callback' ? 'Account callback details supplied automatically.' : 'Account contact details supplied automatically.' }
+      ]);
+      return true;
+    } catch (err) {
+      console.warn('Could not send saved account details to Zara:', err);
+      return false;
+    }
+  };
 
   const sendLoggedInCustomerContext = () => {
     if (!customerAccount) return;
@@ -249,11 +290,11 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
     const contextLines = [
       'This is a web app session.',
       `Customer logged in: ${hasLoggedInCustomerDetails ? 'yes' : 'partial profile'}.`,
-      customerAccount.name ? `Account name: ${customerAccount.name}` : '',
-      customerAccount.phone ? `Account phone: ${customerAccount.phone}` : '',
-      customerAccount.email ? `Account email: ${customerAccount.email}` : '',
+      savedCustomerName ? `Account name: ${savedCustomerName}` : '',
+      savedCustomerPhone ? `Account phone: ${savedCustomerPhone}` : '',
+      savedCustomerEmail ? `Account email: ${savedCustomerEmail}` : '',
       hasLoggedInCustomerDetails
-        ? 'Use the account phone and email automatically for orders and reservations. Do not ask for phone or email again.'
+        ? 'Use the account phone and email automatically for every task, including orders, reservations, lookups, modifications, cancellations, menu email, feedback, and escalation. Do not ask for name, phone, or email again unless the customer says the saved account detail is wrong.'
         : 'If phone or email is missing, ask for only the missing contact detail.'
     ].filter(Boolean).join('\n');
 
@@ -477,8 +518,14 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
             (callbackFormRequest || explicitContactFormRequest || contactQuestion);
 
           if (asksForContact && (!detailsSent || explicitContactFormRequest || callbackFormRequest)) {
-            setDetailsFormMode(callbackFormRequest ? 'callback' : 'contact');
-            setDetailsFormVisible(true);
+            const formMode = callbackFormRequest ? 'callback' : 'contact';
+            window.setTimeout(() => {
+              const autoSentSavedDetails = sendSavedAccountDetailsToZara(formMode);
+              if (!autoSentSavedDetails) {
+                setDetailsFormMode(formMode);
+                setDetailsFormVisible(true);
+              }
+            }, 0);
           }
 
           if (last && last.speaker === speaker && last.text === text) {
@@ -629,10 +676,11 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
     setDetailsSent(false);
     setDetailsFormVisible(false);
     setDetailsFormMode('contact');
+    accountDetailsAutoSentRef.current = { contact: false, callback: false };
     setTypedDetails({
-      name: customerAccount?.name || '',
-      phone: customerAccount?.phone || '',
-      email: customerAccount?.email || ''
+      name: savedCustomerName,
+      phone: savedCustomerPhone,
+      email: savedCustomerEmail
     });
     conversationIdRef.current = '';
     sessionAgentIdRef.current = '';
