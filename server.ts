@@ -455,6 +455,8 @@ type OwnerSession = { email: string; expires: number };
 const OWNER_SESSION_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 type CustomerSession = { id: string; email: string; name: string; phone: string; expires: number };
 const CUSTOMER_SESSION_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+const CUSTOMER_VERIFICATION_MAX_AGE_MS = 60 * 60 * 1000;
+const PENDING_CUSTOMER_HASH_PREFIX = "pending:";
 
 const getOwnerSessionSecret = () => process.env.OWNER_SESSION_SECRET;
 const getCustomerSessionSecret = () => process.env.CUSTOMER_SESSION_SECRET || process.env.OWNER_SESSION_SECRET;
@@ -617,6 +619,57 @@ const verifyCustomerPassword = (password: string, salt: string, expectedHash: st
   return hashBuffer.length === expectedBuffer.length && crypto.timingSafeEqual(hashBuffer, expectedBuffer);
 };
 
+type CustomerVerificationSession = { email: string; purpose: "customer_email_verification"; expires: number };
+
+const isPendingCustomerAccount = (account: any) =>
+  String(account?.password_hash || "").startsWith(PENDING_CUSTOMER_HASH_PREFIX);
+
+const getVerifiedCustomerPasswordHash = (account: any) =>
+  String(account?.password_hash || "").replace(PENDING_CUSTOMER_HASH_PREFIX, "");
+
+const signCustomerVerificationToken = (email: string) => {
+  const secret = getCustomerSessionSecret();
+  if (!secret) return null;
+
+  const payload: CustomerVerificationSession = {
+    email: normalizeEmailKey(email),
+    purpose: "customer_email_verification",
+    expires: Date.now() + CUSTOMER_VERIFICATION_MAX_AGE_MS
+  };
+  const encodedPayload = Buffer.from(JSON.stringify(payload)).toString("base64url");
+  const signature = crypto.createHmac("sha256", secret).update(encodedPayload).digest("base64url");
+  return `${encodedPayload}.${signature}`;
+};
+
+const verifyCustomerVerificationToken = (token: string | null): CustomerVerificationSession | null => {
+  const secret = getCustomerSessionSecret();
+  if (!token || !secret) return null;
+  const [encodedPayload, signature] = token.split(".");
+  if (!encodedPayload || !signature) return null;
+
+  const expectedSignature = crypto.createHmac("sha256", secret).update(encodedPayload).digest("base64url");
+  const signatureBuffer = Buffer.from(signature);
+  const expectedBuffer = Buffer.from(expectedSignature);
+  if (signatureBuffer.length !== expectedBuffer.length || !crypto.timingSafeEqual(signatureBuffer, expectedBuffer)) {
+    return null;
+  }
+
+  try {
+    const session = JSON.parse(Buffer.from(encodedPayload, "base64url").toString("utf8")) as CustomerVerificationSession;
+    if (
+      session.purpose !== "customer_email_verification" ||
+      !session.email ||
+      !session.expires ||
+      session.expires < Date.now()
+    ) {
+      return null;
+    }
+    return session;
+  } catch {
+    return null;
+  }
+};
+
 const publicCustomerAccount = (account: any) => ({
   id: String(account.id || account.email),
   name: account.name || account.customer_name || "Customer",
@@ -642,33 +695,77 @@ const findCustomerAccountByEmail = async (email: string) => {
   return localCustomerAccounts.find(account => normalizeEmailKey(account.email) === normalizedEmail) || null;
 };
 
-const sendWelcomeEmail = async (account: any) => {
+const getPublicAppBaseUrl = (req: express.Request) => {
+  const configured = String(process.env.APP_URL || "").trim();
+  if (configured && configured !== "YOUR_APP_URL") return configured.replace(/\/+$/, "");
+
+  const forwardedProto = String(req.headers["x-forwarded-proto"] || "").split(",")[0].trim();
+  const protocol = forwardedProto || req.protocol || "https";
+  const host = req.get("host");
+  return host ? `${protocol}://${host}` : "http://localhost:3000";
+};
+
+const buildCustomerVerificationEmailHtml = (account: any, verificationUrl: string) => `
+  <div style="font-family:Arial,sans-serif;background:#f8f8f8;padding:32px;color:#18181b;">
+    <div style="max-width:560px;margin:0 auto;background:#ffffff;border:1px solid #e4e4e7;border-radius:18px;overflow:hidden;">
+      <div style="background:#0a0a0a;color:#ffffff;padding:24px 28px;">
+        <p style="margin:0 0 8px;font-size:11px;letter-spacing:2px;text-transform:uppercase;color:#fca5a5;font-weight:700;">The Carnivore</p>
+        <h1 style="margin:0;font-size:24px;line-height:1.2;">Verify your customer account</h1>
+      </div>
+      <div style="padding:28px;">
+        <p style="font-size:15px;line-height:1.6;margin:0 0 16px;">Hello ${account.name || "Customer"},</p>
+        <p style="font-size:15px;line-height:1.6;margin:0 0 20px;">Please verify your email address to activate your account and view your orders and reservations in The Carnivore dashboard.</p>
+        <p style="margin:28px 0;">
+          <a href="${verificationUrl}" style="background:#dc2626;color:#ffffff;text-decoration:none;padding:14px 22px;border-radius:12px;font-weight:700;display:inline-block;">Verify Email & Login</a>
+        </p>
+        <p style="font-size:12px;line-height:1.6;color:#71717a;margin:0 0 12px;">This link expires in 1 hour. If the button does not work, copy and paste this URL into your browser:</p>
+        <p style="font-size:12px;line-height:1.6;color:#52525b;word-break:break-all;margin:0;">${verificationUrl}</p>
+      </div>
+    </div>
+  </div>
+`;
+
+const sendCustomerVerificationEmail = async (req: express.Request, account: any) => {
   const webhookUrl = process.env.WELCOME_EMAIL_WEBHOOK_URL;
   if (!webhookUrl) {
     return { queued: false, reason: "WELCOME_EMAIL_WEBHOOK_URL is not configured." };
   }
 
+  const token = signCustomerVerificationToken(account.email);
+  if (!token) {
+    return { queued: false, reason: "Customer verification signing is not configured." };
+  }
+
+  const verificationUrl = `${getPublicAppBaseUrl(req)}/api/auth/customer/verify-email?token=${encodeURIComponent(token)}`;
   const payload = {
-    event: "customer_signup_welcome_email",
+    event: "customer_email_verification",
     customer_name: account.name,
     customer_email: account.email,
     customer_phone: account.phone,
-    subject: "Welcome to The Carnivore",
-    message: `Hi ${account.name}, welcome to The Carnivore. Your customer account is ready. You can now log in to view your orders and reservations anytime.`,
+    subject: "Verify your The Carnivore account",
+    verification_url: verificationUrl,
+    html: buildCustomerVerificationEmailHtml(account, verificationUrl),
+    message: `Hi ${account.name}, verify your The Carnivore account here: ${verificationUrl}`,
     created_at: new Date().toISOString()
   };
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15000);
 
   try {
     const response = await fetch(webhookUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
+      body: JSON.stringify(payload),
+      signal: controller.signal
     });
 
     return { queued: response.ok, status: response.status };
   } catch (error: any) {
-    console.warn("Failed to queue welcome email:", error);
+    console.warn("Failed to queue customer verification email:", error);
     return { queued: false, reason: error.message || "Webhook request failed." };
+  } finally {
+    clearTimeout(timeout);
   }
 };
 
@@ -772,31 +869,40 @@ app.post("/api/auth/customer/signup", async (req, res) => {
     return res.status(400).json({ success: false, error: "Password must be at least 8 characters." });
   }
 
-  const existing = await findCustomerAccountByEmail(email);
-  if (existing) {
+  let existing = await findCustomerAccountByEmail(email);
+  if (existing && !isPendingCustomerAccount(existing)) {
     return res.status(409).json({ success: false, error: "An account already exists with this email. Please log in instead." });
   }
 
   const { salt, hash } = hashCustomerPassword(password);
+  const pendingHash = `${PENDING_CUSTOMER_HASH_PREFIX}${hash}`;
   const now = new Date().toISOString();
   const accountPayload = {
     name,
     phone,
     email,
-    password_hash: hash,
+    password_hash: pendingHash,
     password_salt: salt,
-    created_at: now,
     updated_at: now
   };
 
-  let account = { id: `cust-${Date.now()}`, ...accountPayload };
+  let account = { id: `cust-${Date.now()}`, ...accountPayload, created_at: now };
 
   if (supabase && !missingTables.has("customer_accounts")) {
-    const { data, error } = await supabase
-      .from("customer_accounts")
-      .insert([accountPayload])
-      .select()
-      .maybeSingle();
+    const query = existing
+      ? supabase
+          .from("customer_accounts")
+          .update(accountPayload)
+          .eq("id", existing.id)
+          .select()
+          .maybeSingle()
+      : supabase
+          .from("customer_accounts")
+          .insert([{ ...accountPayload, created_at: now }])
+          .select()
+          .maybeSingle();
+
+    const { data, error } = await query;
 
     if (error) {
       handleSupabaseError("customer_accounts", error, "signup");
@@ -816,23 +922,86 @@ app.post("/api/auth/customer/signup", async (req, res) => {
       error: "Customer accounts table is missing in Supabase. Run the customer_accounts migration from supabase_schema.sql, then try again."
     });
   } else {
-    localCustomerAccounts.push(account);
+    if (existing) {
+      Object.assign(existing, accountPayload);
+      account = existing;
+    } else {
+      localCustomerAccounts.push(account);
+    }
   }
 
-  const token = signCustomerSession(account);
+  const verificationEmail = await sendCustomerVerificationEmail(req, account);
+  if (!verificationEmail.queued) {
+    return res.status(502).json({
+      success: false,
+      requiresVerification: true,
+      error: "Your account was saved, but the verification email could not be sent. Please try again in a moment.",
+      verificationEmail
+    });
+  }
+
+  return res.status(202).json({
+    success: true,
+    requiresVerification: true,
+    email: account.email,
+    message: "Verification email sent. Please open the link in your email to activate your account.",
+    verificationEmail
+  });
+});
+
+// Customer Email Verification Endpoint
+app.get("/api/auth/customer/verify-email", async (req, res) => {
+  const verification = verifyCustomerVerificationToken(String(req.query.token || ""));
+  const redirectBase = `${getPublicAppBaseUrl(req)}/?customerVerified=`;
+
+  if (!verification) {
+    return res.redirect(`${redirectBase}invalid`);
+  }
+
+  const account = await findCustomerAccountByEmail(verification.email);
+  if (!account) {
+    return res.redirect(`${redirectBase}missing`);
+  }
+
+  let verifiedAccount = account;
+  const now = new Date().toISOString();
+
+  if (isPendingCustomerAccount(account)) {
+    const verifiedHash = getVerifiedCustomerPasswordHash(account);
+
+    if (supabase && !missingTables.has("customer_accounts")) {
+      const { data, error } = await supabase
+        .from("customer_accounts")
+        .update({ password_hash: verifiedHash, last_login_at: now, updated_at: now })
+        .eq("id", account.id)
+        .select()
+        .maybeSingle();
+
+      if (error) {
+        handleSupabaseError("customer_accounts", error, "verify-email");
+        return res.redirect(`${redirectBase}error`);
+      }
+      verifiedAccount = data || { ...account, password_hash: verifiedHash, last_login_at: now, updated_at: now };
+    } else {
+      account.password_hash = verifiedHash;
+      account.last_login_at = now;
+      account.updated_at = now;
+      verifiedAccount = account;
+    }
+  } else if (supabase && !missingTables.has("customer_accounts")) {
+    await supabase
+      .from("customer_accounts")
+      .update({ last_login_at: now, updated_at: now })
+      .eq("id", account.id);
+  }
+
+  const token = signCustomerSession(verifiedAccount);
   if (!token) {
-    return res.status(500).json({ success: false, error: "Customer session signing is not configured." });
+    return res.redirect(`${redirectBase}session`);
   }
 
   setCustomerSessionCookie(res, token);
-  const welcomeEmail = await sendWelcomeEmail(account);
-
-  return res.status(201).json({
-    success: true,
-    token,
-    customer: publicCustomerAccount(account),
-    welcomeEmail
-  });
+  return res.redirect(`${redirectBase}success`);
 });
 
 // Customer Login Endpoint
@@ -853,6 +1022,14 @@ app.post("/api/auth/customer/login", async (req, res) => {
       });
     }
     return res.status(401).json({ success: false, error: "Invalid customer email or password." });
+  }
+
+  if (isPendingCustomerAccount(account)) {
+    return res.status(403).json({
+      success: false,
+      requiresVerification: true,
+      error: "Please verify your email address before logging in. You can sign up again to resend the verification email."
+    });
   }
 
   if (!verifyCustomerPassword(password, account.password_salt, account.password_hash)) {

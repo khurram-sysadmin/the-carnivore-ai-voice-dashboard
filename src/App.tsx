@@ -94,6 +94,7 @@ export default function App() {
   const [customerAuthMode, setCustomerAuthMode] = useState<'signup' | 'login'>('signup');
   const [customerAuthLoading, setCustomerAuthLoading] = useState(false);
   const [customerAuthError, setCustomerAuthError] = useState('');
+  const [customerAuthNotice, setCustomerAuthNotice] = useState('');
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
   const [customerEmail, setCustomerEmail] = useState('');
@@ -347,9 +348,27 @@ export default function App() {
       .catch(e => console.warn("No customer session on start:", e));
   }, []);
 
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const verificationStatus = params.get('customerVerified');
+    if (!verificationStatus) return;
+
+    if (verificationStatus === 'success') {
+      showToast('Email verified. Welcome to The Carnivore.');
+    } else {
+      setCustomerAuthMode('login');
+      setCustomerAuthError('Email verification failed or expired. Please sign up again to receive a new verification link.');
+    }
+
+    params.delete('customerVerified');
+    const nextUrl = `${window.location.pathname}${params.toString() ? `?${params.toString()}` : ''}${window.location.hash}`;
+    window.history.replaceState({}, document.title, nextUrl);
+  }, []);
+
   const handleCustomerAuth = (e: React.FormEvent) => {
     e.preventDefault();
     setCustomerAuthError('');
+    setCustomerAuthNotice('');
     setCustomerAuthLoading(true);
 
     const endpoint = customerAuthMode === 'signup' ? '/api/auth/customer/signup' : '/api/auth/customer/login';
@@ -370,6 +389,16 @@ export default function App() {
       return data;
     })
     .then(data => {
+      if (data.requiresVerification) {
+        const emailToVerify = data.email || customerEmail;
+        setCustomerAccount(null);
+        setCustomerPassword('');
+        setCustomerAuthMode('login');
+        setCustomerAuthNotice(`We sent a verification link to ${emailToVerify}. Open that email to activate your account and log in.`);
+        showToast('Verification email sent. Please check your inbox.');
+        return;
+      }
+
       setCustomerAccount(data.customer);
       setCustomerName(data.customer?.name || '');
       setCustomerPhone(data.customer?.phone || '');
@@ -1031,7 +1060,7 @@ export default function App() {
                     </h3>
                     <p className="text-xs text-zinc-400 mt-1 leading-relaxed">
                       {customerAuthMode === 'signup'
-                        ? 'Sign up once, then talk to Zara and track restaurant records.'
+                        ? 'Sign up once, verify your email, then track your restaurant records.'
                         : 'Log in to continue with Zara and view your restaurant history.'}
                     </p>
                   </div>
@@ -1050,6 +1079,7 @@ export default function App() {
                     onClick={() => {
                       setCustomerAuthMode('signup');
                       setCustomerAuthError('');
+                      setCustomerAuthNotice('');
                     }}
                     className={`rounded-xl py-2.5 text-xs font-black transition-colors ${customerAuthMode === 'signup' ? 'bg-red-600 text-white shadow-lg shadow-red-950/30' : 'text-zinc-400 hover:text-white'}`}
                   >
@@ -1060,6 +1090,7 @@ export default function App() {
                     onClick={() => {
                       setCustomerAuthMode('login');
                       setCustomerAuthError('');
+                      setCustomerAuthNotice('');
                     }}
                     className={`rounded-xl py-2.5 text-xs font-black transition-colors ${customerAuthMode === 'login' ? 'bg-red-600 text-white shadow-lg shadow-red-950/30' : 'text-zinc-400 hover:text-white'}`}
                   >
@@ -1144,6 +1175,17 @@ export default function App() {
                     </motion.div>
                   )}
 
+                  {customerAuthNotice && (
+                    <motion.div
+                      initial={{ opacity: 0, y: -8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="p-3 bg-emerald-950/35 border border-emerald-800/50 rounded-xl text-xs text-emerald-100 font-semibold flex items-start gap-2"
+                    >
+                      <CheckCircle2 className="w-4 h-4 text-emerald-300 flex-shrink-0 mt-0.5" />
+                      <span>{customerAuthNotice}</span>
+                    </motion.div>
+                  )}
+
                   <button
                     type="submit"
                     disabled={customerAuthLoading}
@@ -1156,7 +1198,7 @@ export default function App() {
                       </>
                     ) : (
                       <>
-                        <span>{customerAuthMode === 'signup' ? 'Create Account & Continue' : 'Login & Continue'}</span>
+                        <span>{customerAuthMode === 'signup' ? 'Create Account & Verify Email' : 'Login & Continue'}</span>
                         <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
                       </>
                     )}
@@ -1237,14 +1279,6 @@ export default function App() {
                 >
                   <LogOut className="w-3.5 h-3.5" />
                   <span className="hidden sm:inline">Logout</span>
-                </button>
-                <button
-                  onClick={() => setRole('owner')}
-                  className="flex items-center gap-1.5 bg-zinc-100 hover:bg-zinc-200 text-zinc-700 text-xs font-bold px-2.5 sm:px-3.5 py-2 rounded-xl transition-colors cursor-pointer border border-zinc-200/50"
-                >
-                  <LogIn className="w-3.5 h-3.5" />
-                  <span className="hidden sm:inline">Admin Portal</span>
-                  <span className="inline sm:hidden">Admin</span>
                 </button>
               </div>
             </div>
