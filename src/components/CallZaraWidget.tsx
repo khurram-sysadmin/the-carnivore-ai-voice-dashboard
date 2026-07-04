@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Phone, PhoneOff, Sparkles, RefreshCw, CheckCircle2, AlertCircle, Volume2, VolumeX, Mic, MessageSquare, Send, Loader2 } from 'lucide-react';
 import { useConversation } from '@elevenlabs/react';
+import { TextConversation } from '@elevenlabs/client';
 
 interface CallZaraWidgetProps {
   onRecordCreated: (record?: any) => void;
@@ -194,9 +195,7 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
   // Chat States
   const [activeMode, setActiveMode] = useState<'voice' | 'chat'>('voice');
   const [chatInput, setChatInput] = useState('');
-  const [chatMessages, setChatMessages] = useState<{ role: 'zara' | 'customer'; content: string }[]>([
-    { role: 'zara', content: 'Hi, thanks for calling The Carnivore. How can I help you today?' }
-  ]);
+  const [chatMessages, setChatMessages] = useState<{ role: 'zara' | 'customer'; content: string }[]>([]);
   const [chatLoading, setChatLoading] = useState(false);
   const [chatSessionState, setChatSessionState] = useState<'idle' | 'connecting' | 'connected' | 'failed'>('idle');
   const [typedDetails, setTypedDetails] = useState({
@@ -212,11 +211,15 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
   const callStartTime = useRef<number | null>(null);
   const isCallLogSaved = useRef<boolean>(false);
   const transcriptRef = useRef<{ speaker: 'Zara' | 'You'; text: string }[]>([]);
+  const chatMessagesRef = useRef<{ role: 'zara' | 'customer'; content: string }[]>([]);
   const voiceConversationRef = useRef<any>(null);
+  const textConversationRef = useRef<TextConversation | null>(null);
   const sessionModeRef = useRef<'voice' | 'chat' | null>(null);
   const pendingChatMessageRef = useRef<string | null>(null);
   const conversationIdRef = useRef<string>('');
   const sessionAgentIdRef = useRef<string>('');
+  const chatConversationIdRef = useRef<string>('');
+  const chatAgentIdRef = useRef<string>('');
   const accountDetailsAutoSentRef = useRef<{ contact: boolean; callback: boolean }>({ contact: false, callback: false });
 
   const animationFrameRef = useRef<number | null>(null);
@@ -305,6 +308,100 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
     }
   };
 
+  const getLoggedInCustomerContext = () => {
+    if (!customerAccount) return '';
+
+    return [
+      'This is a web app text chat session.',
+      `Customer logged in: ${hasLoggedInCustomerDetails ? 'yes' : 'partial profile'}.`,
+      savedCustomerName ? `Account name: ${savedCustomerName}` : '',
+      savedCustomerPhone ? `Account phone: ${savedCustomerPhone}` : '',
+      savedCustomerEmail ? `Account email: ${savedCustomerEmail}` : '',
+      hasLoggedInCustomerDetails
+        ? 'Use the account phone and email automatically for every task. Do not ask for name, phone, or email again unless the customer says the saved account detail is wrong.'
+        : 'If phone or email is missing, ask for only the missing contact detail.'
+    ].filter(Boolean).join('\n');
+  };
+
+  const appendCustomerChatMessage = (content: string) => {
+    setChatMessages(prev => {
+      const next = [...prev, { role: 'customer' as const, content }];
+      chatMessagesRef.current = next;
+      return next;
+    });
+  };
+
+  const appendZaraChatMessage = (content: string, options: { appendToLast?: boolean } = {}) => {
+    const text = formatTranscriptText(content || '');
+    if (!text) return;
+
+    setChatMessages(prev => {
+      const next = [...prev];
+      const last = next[next.length - 1];
+
+      if (last?.role === 'zara') {
+        if (options.appendToLast) {
+          next[next.length - 1] = { ...last, content: `${last.content}${text}` };
+          chatMessagesRef.current = next;
+          return next;
+        }
+
+        if (last.content === text || text.startsWith(last.content)) {
+          next[next.length - 1] = { ...last, content: text };
+          chatMessagesRef.current = next;
+          return next;
+        }
+      }
+
+      const updated = [...next, { role: 'zara' as const, content: text }];
+      chatMessagesRef.current = updated;
+      return updated;
+    });
+  };
+
+  const saveTextChatLog = async (status: 'COMPLETED' | 'FAILED' = 'COMPLETED') => {
+    const messages = chatMessagesRef.current;
+    if (messages.length === 0 && !chatConversationIdRef.current) return;
+
+    try {
+      await fetch('/api/call-logs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          customer_name: savedCustomerName || typedDetails.name.trim() || 'Chat Customer',
+          customer_phone: savedCustomerPhone || typedDetails.phone.trim() || 'Text Chat Session',
+          customer_email: savedCustomerEmail || typedDetails.email.trim(),
+          duration_seconds: 0,
+          transcript: messages.map(m => `${m.role === 'zara' ? 'Zara' : 'You'}: ${m.content}`).join('\n'),
+          status,
+          conversation_id: chatConversationIdRef.current,
+          agent_id: chatAgentIdRef.current || sessionAgentIdRef.current,
+          source: 'chat'
+        })
+      });
+    } catch (err) {
+      console.error('Failed to save text chat log:', err);
+    }
+  };
+
+  const endTextChatSession = async (status: 'COMPLETED' | 'FAILED' = 'COMPLETED') => {
+    const chat = textConversationRef.current;
+    textConversationRef.current = null;
+    pendingChatMessageRef.current = null;
+    setChatLoading(false);
+    setChatSessionState('idle');
+
+    if (chat) {
+      try {
+        await chat.endSession();
+      } catch (err) {
+        console.error('Error ending text chat session:', err);
+      }
+    }
+
+    await saveTextChatLog(status);
+  };
+
   // Clean up UI animation resources when conversation ends or unmounts.
   const cleanupAudioVisualizer = () => {
     if (animationFrameRef.current) {
@@ -317,6 +414,10 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
   useEffect(() => {
     transcriptRef.current = transcript;
   }, [transcript]);
+
+  useEffect(() => {
+    chatMessagesRef.current = chatMessages;
+  }, [chatMessages]);
 
   // Initialize ElevenLabs Conversational AI
   const conversation = useConversation({
@@ -586,6 +687,7 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
       cleanupAudioVisualizer();
       try {
         voiceConversationRef.current?.endSession();
+        textConversationRef.current?.endSession();
       } catch (err) {
         console.error("Error ending ElevenLabs session on unmount:", err);
       }
@@ -738,6 +840,14 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
 
   // Terminate the voice call
   const handleEndCall = async () => {
+    if (sessionModeRef.current === 'chat') {
+      await endTextChatSession();
+      sessionModeRef.current = null;
+      setCallState({ status: 'idle', message: 'Click to call Zara' });
+      if (onClearAction) onClearAction();
+      return;
+    }
+
     try {
       await conversation.endSession();
     } catch (err) {
@@ -844,63 +954,121 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
     if (!query || chatLoading) return;
 
     setChatInput('');
-    setChatMessages(prev => [...prev, { role: 'customer' as const, content: query }]);
+    appendCustomerChatMessage(query);
     setChatLoading(true);
     pendingChatMessageRef.current = query;
 
     try {
-      if (conversation.status === 'connected' && sessionModeRef.current === 'chat') {
+      if (textConversationRef.current?.isOpen() && sessionModeRef.current === 'chat') {
         pendingChatMessageRef.current = null;
-        conversation.sendUserMessage(query);
+        textConversationRef.current.sendUserMessage(query);
         return;
       }
 
-      if (conversation.status === 'connecting' && sessionModeRef.current === 'chat') {
+      if (chatSessionState === 'connecting' && sessionModeRef.current === 'chat') {
         return;
       }
 
       sessionModeRef.current = 'chat';
       setChatSessionState('connecting');
+      chatConversationIdRef.current = '';
 
-      const response = await fetch('/api/elevenlabs/session');
+      const response = await fetch('/api/elevenlabs/session?mode=chat');
       const data = await response.json().catch(() => ({}));
 
-      if (!response.ok || data.error || (!data.agentId && !data.signedUrl && !data.conversationToken)) {
+      if (!response.ok || data.error || (!data.agentId && !data.signedUrl)) {
         throw new Error(data.error || 'ElevenLabs Zara chat is not configured on the server.');
       }
 
-      if (data.conversationToken) {
-        conversation.startSession({
-          conversationToken: data.conversationToken,
-          textOnly: true,
-          connectionType: 'webrtc',
-          ...getCustomerSessionOptions()
-        });
-      } else if (data.signedUrl) {
-        conversation.startSession({
-          signedUrl: data.signedUrl,
-          textOnly: true,
-          connectionType: 'websocket',
-          ...getCustomerSessionOptions()
-        });
-      } else {
-        conversation.startSession({
-          agentId: data.agentId,
-          textOnly: true,
-          connectionType: 'websocket',
-          ...getCustomerSessionOptions()
-        });
+      chatAgentIdRef.current = data.agentId || '';
+      sessionAgentIdRef.current = data.agentId || sessionAgentIdRef.current;
+
+      const commonSessionOptions = {
+        textOnly: true,
+        connectionType: 'websocket' as const,
+        overrides: {
+          agent: {
+            firstMessage: ''
+          },
+          conversation: {
+            textOnly: true
+          }
+        },
+        ...getCustomerSessionOptions(),
+        onConnect: ({ conversationId }: { conversationId: string }) => {
+          chatConversationIdRef.current = conversationId;
+          setChatSessionState('connected');
+        },
+        onDisconnect: () => {
+          setChatSessionState('idle');
+          setChatLoading(false);
+          textConversationRef.current = null;
+          if (sessionModeRef.current === 'chat') {
+            sessionModeRef.current = null;
+          }
+        },
+        onAgentTyping: () => {
+          setChatLoading(true);
+        },
+        onAgentChatResponsePart: (part: any) => {
+          if (part.type === 'start') {
+            setChatLoading(true);
+            if (part.text) appendZaraChatMessage(part.text);
+            return;
+          }
+
+          if (part.type === 'delta') {
+            appendZaraChatMessage(part.text || '', { appendToLast: true });
+            return;
+          }
+
+          if (part.type === 'stop') {
+            setChatLoading(false);
+            window.setTimeout(() => onRecordCreated({ source: 'chat' }), 1000);
+          }
+        },
+        onMessage: (message: any) => {
+          const role = message.role || (message.source === 'ai' ? 'agent' : message.source);
+          if (role === 'agent' || message.source === 'ai') {
+            appendZaraChatMessage(message.message || '');
+            setChatLoading(false);
+          }
+        },
+        onError: (message: string) => {
+          setChatSessionState('failed');
+          setChatLoading(false);
+          appendZaraChatMessage(message || 'Sorry, I could not connect to Zara chat. Please try again.');
+          void saveTextChatLog('FAILED');
+        }
+      };
+
+      const chatConversation = data.signedUrl
+        ? await TextConversation.startSession({
+          ...commonSessionOptions,
+          signedUrl: data.signedUrl
+        } as any)
+        : await TextConversation.startSession({
+          ...commonSessionOptions,
+          agentId: data.agentId
+        } as any);
+
+      textConversationRef.current = chatConversation;
+
+      const context = getLoggedInCustomerContext();
+      if (context) {
+        chatConversation.sendContextualUpdate(context);
       }
+
+      pendingChatMessageRef.current = null;
+      chatConversation.sendUserMessage(query);
     } catch (err: any) {
       console.error(err);
       pendingChatMessageRef.current = null;
       sessionModeRef.current = null;
       setChatSessionState('failed');
       setChatLoading(false);
-      setChatMessages(prev => [
-        ...prev,
-        { role: 'zara', content: err.message || 'Sorry, I could not connect to Zara chat. Please try again.' }
-      ]);
+      void saveTextChatLog('FAILED');
+      appendZaraChatMessage(err.message || 'Sorry, I could not connect to Zara chat. Please try again.');
     }
   };
 return (
@@ -1267,6 +1435,18 @@ return (
           
           {/* Chat Messages viewport */}
           <div className="flex-1 min-h-[220px] max-h-[300px] overflow-y-auto bg-zinc-950/80 rounded-xl p-4 border border-zinc-800 text-sm space-y-3 scrollbar-thin">
+            {chatMessages.length === 0 && !chatLoading && (
+              <div className="h-full min-h-[180px] flex flex-col items-center justify-center text-center px-5">
+                <div className="w-10 h-10 rounded-full bg-red-600/10 border border-red-500/30 flex items-center justify-center mb-3">
+                  <MessageSquare className="w-4 h-4 text-red-400" />
+                </div>
+                <p className="text-sm font-bold text-zinc-100">Start the chat with Zara</p>
+                <p className="text-xs text-zinc-500 mt-1 max-w-[280px]">
+                  Type your question, order, reservation request, or change request. Zara will reply after your first message.
+                </p>
+              </div>
+            )}
+
             {chatMessages.map((msg, idx) => {
               const isZara = msg.role === 'zara';
               return (

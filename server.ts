@@ -1063,6 +1063,8 @@ app.post("/api/auth/customer/logout", (req, res) => {
 app.get("/api/elevenlabs/session", async (req, res) => {
   const agentId = process.env.ELEVENLABS_AGENT_ID || process.env.VITE_ELEVENLABS_AGENT_ID;
   const apiKey = process.env.ELEVENLABS_API_KEY;
+  const mode = String(req.query.mode || req.query.type || "").toLowerCase();
+  const textOnlyRequested = mode === "chat" || mode === "text" || req.query.textOnly === "true";
 
   if (!agentId || agentId === "zara_default_agent" || agentId === "your-elevenlabs-agent-id") {
     return res.status(400).json({
@@ -1072,6 +1074,25 @@ app.get("/api/elevenlabs/session", async (req, res) => {
 
   if (apiKey && apiKey !== "your-elevenlabs-api-key") {
     try {
+      if (textOnlyRequested) {
+        console.log(`Requesting signed ElevenLabs text-chat URL for agent: ${agentId}`);
+        const signedResponse = await fetch(`https://api.elevenlabs.io/v1/convai/conversation/get_signed_url?agent_id=${encodeURIComponent(agentId)}`, {
+          method: "GET",
+          headers: {
+            "xi-api-key": apiKey
+          }
+        });
+
+        if (signedResponse.ok) {
+          const data = await signedResponse.json();
+          return res.json({ signedUrl: data.signed_url, agentId, connectionType: "websocket", textOnly: true });
+        }
+
+        const signedError = await signedResponse.text();
+        console.error("ElevenLabs API error getting text-chat signed URL:", signedError);
+        return res.status(500).json({ error: "Failed to fetch ElevenLabs text-chat credentials: " + signedError, agentId });
+      }
+
       console.log(`Requesting WebRTC conversation token from ElevenLabs for agent: ${agentId}`);
       const tokenResponse = await fetch(`https://api.elevenlabs.io/v1/convai/conversation/token?agent_id=${encodeURIComponent(agentId)}`, {
         method: "GET",
