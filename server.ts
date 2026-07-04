@@ -1197,17 +1197,37 @@ const readCreatedAt = (conversation: any) => {
   );
 };
 
+const textFromTranscriptValue = (value: any): string => {
+  if (value === undefined || value === null) return "";
+  if (typeof value === "string" || typeof value === "number") return String(value).trim();
+  if (Array.isArray(value)) {
+    return value.map(textFromTranscriptValue).filter(Boolean).join(" ").trim();
+  }
+  if (typeof value === "object") {
+    return String(
+      value.text ??
+      value.message ??
+      value.content ??
+      value.transcript ??
+      value.value ??
+      ""
+    ).trim();
+  }
+  return "";
+};
+
 const textFromTranscriptEntry = (entry: any) => {
   if (!entry || typeof entry !== "object") return "";
-  return String(
+  return textFromTranscriptValue(
     entry.message ??
     entry.text ??
     entry.content ??
     entry.transcript ??
     entry.user_transcript ??
     entry.agent_response ??
-    ""
-  ).trim();
+    entry.response ??
+    entry.event
+  );
 };
 
 const speakerFromTranscriptEntry = (entry: any) => {
@@ -1217,8 +1237,20 @@ const speakerFromTranscriptEntry = (entry: any) => {
 };
 
 const formatElevenLabsTranscript = (conversation: any) => {
-  const transcript = conversation?.transcript ?? conversation?.conversation?.transcript ?? [];
-  if (Array.isArray(transcript)) {
+  const transcriptCandidates = [
+    conversation?.transcript,
+    conversation?.conversation?.transcript,
+    conversation?.messages,
+    conversation?.conversation?.messages,
+    conversation?.conversation_history,
+    conversation?.turns,
+    conversation?.analysis?.transcript
+  ];
+
+  for (const transcript of transcriptCandidates) {
+    if (typeof transcript === "string" && transcript.trim()) return transcript.trim();
+    if (!Array.isArray(transcript)) continue;
+
     const lines = transcript
       .map((entry: any) => {
         const text = textFromTranscriptEntry(entry);
@@ -1279,22 +1311,79 @@ const looksLikeSeedCallLog = (log: any) => {
 const normalizeSavedCallLog = (log: any): DashboardCallLog => {
   const transcript = log.transcript || "";
   const baseStatus = normalizeCallStatus(log.status);
+  const conversationId = log.conversation_id || undefined;
+  const audioUrl = log.audio_url || (conversationId ? `/api/call-logs/${encodeURIComponent(conversationId)}/audio` : undefined);
 
   return {
     id: String(log.id),
-    conversation_id: log.conversation_id || undefined,
+    conversation_id: conversationId,
     agent_id: log.agent_id || undefined,
     customer_name: log.customer_name || "Voice Caller",
     customer_phone: log.customer_phone || "Voice Session",
     duration_seconds: Number(log.duration_seconds || 0),
     transcript,
     transcript_summary: log.transcript_summary || undefined,
-    audio_url: log.audio_url || undefined,
-    has_audio: Boolean(log.audio_url || log.has_audio),
+    audio_url: audioUrl,
+    has_audio: Boolean(audioUrl || log.has_audio),
     main_language: log.main_language || undefined,
     source: log.source || (looksLikeSeedCallLog(log) ? "demo" : "dashboard"),
     status: baseStatus === "COMPLETED" && transcriptLooksLikeEscalation(transcript) ? "ESCALATED" : baseStatus,
     created_at: log.created_at || new Date().toISOString()
+  };
+};
+
+const transcriptQualityScore = (text?: string) => {
+  const value = String(text || "").trim();
+  if (!value) return 0;
+
+  const speakerLineCount = value
+    .split("\n")
+    .filter(line => /^(Zara|You|Customer|Agent)\s*:/i.test(line.trim()))
+    .length;
+  const summaryPenalty = /conversation summary/i.test(value) ? 250 : 0;
+
+  return value.length + speakerLineCount * 200 - summaryPenalty;
+};
+
+const chooseBestTranscript = (a?: string, b?: string) => {
+  return transcriptQualityScore(b) > transcriptQualityScore(a) ? String(b || "") : String(a || "");
+};
+
+const chooseDefined = (...values: any[]) => {
+  return values.find(value => value !== undefined && value !== null && String(value).trim() !== "");
+};
+
+const mergeCallLogs = (base: DashboardCallLog, incoming: DashboardCallLog): DashboardCallLog => {
+  const transcript = chooseBestTranscript(base.transcript, incoming.transcript);
+  const baseCreated = new Date(base.created_at).getTime();
+  const incomingCreated = new Date(incoming.created_at).getTime();
+
+  return {
+    ...base,
+    id: base.id || incoming.id,
+    conversation_id: chooseDefined(base.conversation_id, incoming.conversation_id),
+    agent_id: chooseDefined(base.agent_id, incoming.agent_id),
+    customer_name: base.customer_name && !["Voice Caller", "ElevenLabs Caller"].includes(base.customer_name)
+      ? base.customer_name
+      : incoming.customer_name || base.customer_name,
+    customer_phone: base.customer_phone && !["Voice Session", "Active Live Session"].includes(base.customer_phone)
+      ? base.customer_phone
+      : incoming.customer_phone || base.customer_phone,
+    duration_seconds: Math.max(Number(base.duration_seconds || 0), Number(incoming.duration_seconds || 0)),
+    transcript,
+    transcript_summary: chooseDefined(base.transcript_summary, incoming.transcript_summary),
+    audio_url: chooseDefined(base.audio_url, incoming.audio_url),
+    has_audio: Boolean(base.has_audio || incoming.has_audio || base.audio_url || incoming.audio_url),
+    main_language: chooseDefined(base.main_language, incoming.main_language),
+    source: base.source === "elevenlabs" || incoming.source === "elevenlabs" ? "elevenlabs" : (base.source || incoming.source),
+    status: base.status === "ESCALATED" || incoming.status === "ESCALATED"
+      ? "ESCALATED"
+      : base.status === "FAILED" || incoming.status === "FAILED"
+        ? "FAILED"
+        : "COMPLETED",
+    created_at: Number.isFinite(baseCreated) && Number.isFinite(incomingCreated)
+      ? (baseCreated <= incomingCreated ? base.created_at : incoming.created_at)
+      : base.created_at || incoming.created_at
   };
 };
 
@@ -1861,6 +1950,51 @@ const insertSupabaseVariant = async (tableName: string, variants: any[]) => {
   handleSupabaseError(tableName, lastError, "insert");
   return null;
 };
+
+const callLogInsertVariants = (callLog: any) => [
+  {
+    conversation_id: callLog.conversation_id,
+    agent_id: callLog.agent_id,
+    customer_name: callLog.customer_name,
+    customer_phone: callLog.customer_phone,
+    duration_seconds: callLog.duration_seconds,
+    transcript: callLog.transcript,
+    transcript_summary: callLog.transcript_summary,
+    audio_url: callLog.audio_url,
+    main_language: callLog.main_language,
+    source: callLog.source,
+    status: callLog.status,
+    created_at: callLog.created_at
+  },
+  {
+    conversation_id: callLog.conversation_id,
+    agent_id: callLog.agent_id,
+    customer_name: callLog.customer_name,
+    customer_phone: callLog.customer_phone,
+    duration_seconds: callLog.duration_seconds,
+    transcript: callLog.transcript,
+    transcript_summary: callLog.transcript_summary,
+    audio_url: callLog.audio_url,
+    source: callLog.source,
+    status: callLog.status
+  },
+  {
+    conversation_id: callLog.conversation_id,
+    agent_id: callLog.agent_id,
+    customer_name: callLog.customer_name,
+    customer_phone: callLog.customer_phone,
+    duration_seconds: callLog.duration_seconds,
+    transcript: callLog.transcript,
+    status: callLog.status
+  },
+  {
+    customer_name: callLog.customer_name,
+    customer_phone: callLog.customer_phone,
+    duration_seconds: callLog.duration_seconds,
+    transcript: callLog.transcript,
+    status: callLog.status
+  }
+];
 
 const escalationInsertVariants = (escalation: any) => [
   {
@@ -2949,17 +3083,17 @@ app.get("/api/call-logs", requireOwnerAuth, async (req, res) => {
     ? savedLogs.filter(log => log.source !== "demo")
     : savedLogs;
 
-  const merged = [...elevenLabsLogs];
-  const existingKeys = new Set(merged.map(log => log.conversation_id || log.id));
-
-  for (const log of filteredSavedLogs) {
+  const mergedByKey = new Map<string, DashboardCallLog>();
+  const addMergedLog = (log: DashboardCallLog) => {
     const key = log.conversation_id || log.id;
-    if (!existingKeys.has(key)) {
-      merged.push(log);
-      existingKeys.add(key);
-    }
-  }
+    const existing = mergedByKey.get(key);
+    mergedByKey.set(key, existing ? mergeCallLogs(existing, log) : log);
+  };
 
+  elevenLabsLogs.forEach(addMergedLog);
+  filteredSavedLogs.forEach(addMergedLog);
+
+  const merged = Array.from(mergedByKey.values());
   merged.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
   res.json(merged);
 });
@@ -2978,8 +3112,13 @@ app.post("/api/call-logs", async (req, res) => {
     main_language: req.body.main_language || "",
     source: req.body.source || "dashboard",
     status: req.body.status || "COMPLETED",
+    has_audio: Boolean(req.body.has_audio || req.body.audio_url || req.body.conversation_id || req.body.conversationId),
     created_at: new Date().toISOString()
   };
+  if (!newCallLog.audio_url && newCallLog.conversation_id) {
+    newCallLog.audio_url = `/api/call-logs/${encodeURIComponent(newCallLog.conversation_id)}/audio`;
+  }
+  newCallLog.has_audio = Boolean(newCallLog.audio_url || newCallLog.conversation_id);
 
   // Check if this call log qualifies for an escalation
   const lowerTranscript = (newCallLog.transcript || "").toLowerCase();
@@ -3053,24 +3192,10 @@ app.post("/api/call-logs", async (req, res) => {
   }
 
   if (supabase && !missingTables.has("call_logs")) {
-    const { data, error } = await supabase.from("call_logs").insert([{
-      customer_name: newCallLog.customer_name,
-      customer_phone: newCallLog.customer_phone,
-      duration_seconds: newCallLog.duration_seconds,
-      transcript: newCallLog.transcript,
-      status: newCallLog.status
-    }]).select();
-    if (!error && data) {
-      return res.status(201).json({
-        ...normalizeSavedCallLog(data[0]),
-        conversation_id: newCallLog.conversation_id || undefined,
-        agent_id: newCallLog.agent_id || undefined,
-        audio_url: newCallLog.conversation_id ? `/api/call-logs/${encodeURIComponent(newCallLog.conversation_id)}/audio` : undefined,
-        has_audio: Boolean(newCallLog.conversation_id),
-        source: "dashboard"
-      });
+    const insertedLog = await insertSupabaseVariant("call_logs", callLogInsertVariants(newCallLog));
+    if (insertedLog) {
+      return res.status(201).json(mergeCallLogs(normalizeSavedCallLog(insertedLog), normalizeSavedCallLog(newCallLog)));
     }
-    handleSupabaseError("call_logs", error, "insert");
   }
 
   localCallLogs.unshift(newCallLog);
