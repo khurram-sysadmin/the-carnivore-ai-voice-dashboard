@@ -216,6 +216,10 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
   const textConversationRef = useRef<TextConversation | null>(null);
   const sessionModeRef = useRef<'voice' | 'chat' | null>(null);
   const pendingChatMessageRef = useRef<string | null>(null);
+  const awaitingChatResponseRef = useRef(false);
+  const chatResponseTimeoutRef = useRef<number | null>(null);
+  const currentChatStreamRef = useRef<{ eventId: string; text: string } | null>(null);
+  const renderedChatEventIdsRef = useRef<Set<string>>(new Set());
   const conversationIdRef = useRef<string>('');
   const sessionAgentIdRef = useRef<string>('');
   const chatConversationIdRef = useRef<string>('');
@@ -333,7 +337,7 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
 
   const appendZaraChatMessage = (content: string, options: { appendToLast?: boolean } = {}) => {
     const text = formatTranscriptText(content || '');
-    if (!text) return;
+    if (!text) return false;
 
     setChatMessages(prev => {
       const next = [...prev];
@@ -357,6 +361,75 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
       chatMessagesRef.current = updated;
       return updated;
     });
+
+    return true;
+  };
+
+  const clearChatResponseTimeout = () => {
+    if (chatResponseTimeoutRef.current) {
+      window.clearTimeout(chatResponseTimeoutRef.current);
+      chatResponseTimeoutRef.current = null;
+    }
+  };
+
+  const finishChatResponse = () => {
+    awaitingChatResponseRef.current = false;
+    clearChatResponseTimeout();
+    setChatLoading(false);
+  };
+
+  const armChatResponseTimeout = () => {
+    awaitingChatResponseRef.current = true;
+    clearChatResponseTimeout();
+    chatResponseTimeoutRef.current = window.setTimeout(() => {
+      if (!awaitingChatResponseRef.current || sessionModeRef.current !== 'chat') return;
+
+      awaitingChatResponseRef.current = false;
+      setChatLoading(false);
+      appendZaraChatMessage("Sorry, I did not receive Zara's reply. Please send your message again.");
+      void saveTextChatLog('FAILED');
+    }, 15000);
+  };
+
+  const getChatEventId = (payload: any) => {
+    const id = payload?.event_id ?? payload?.eventId ?? payload?.id ?? payload?.message_id ?? payload?.messageId;
+    return id === undefined || id === null ? '' : String(id);
+  };
+
+  const getChatText = (payload: any) => {
+    if (!payload) return '';
+    if (typeof payload === 'string') return payload;
+
+    const nestedMessage =
+      typeof payload.message === 'object' && payload.message !== null
+        ? payload.message.message ?? payload.message.text ?? payload.message.content
+        : payload.message;
+
+    return String(
+      nestedMessage ??
+      payload.text ??
+      payload.content ??
+      payload.agent_response ??
+      payload.response ??
+      payload.corrected_agent_response ??
+      payload.original_agent_response ??
+      payload.text_response ??
+      ''
+    );
+  };
+
+  const handleZaraChatText = (content: string, eventId = '', options: { appendToLast?: boolean } = {}) => {
+    const text = getChatText(content);
+    if (!text.trim()) return false;
+
+    const appended = appendZaraChatMessage(text, options);
+    if (appended) {
+      if (eventId) renderedChatEventIdsRef.current.add(eventId);
+      finishChatResponse();
+      window.setTimeout(() => onRecordCreated({ source: 'chat' }), 1000);
+    }
+
+    return appended;
   };
 
   const saveTextChatLog = async (status: 'COMPLETED' | 'FAILED' = 'COMPLETED') => {
@@ -685,6 +758,7 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
   useEffect(() => {
     return () => {
       cleanupAudioVisualizer();
+      clearChatResponseTimeout();
       try {
         voiceConversationRef.current?.endSession();
         textConversationRef.current?.endSession();
@@ -957,6 +1031,7 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
     appendCustomerChatMessage(query);
     setChatLoading(true);
     pendingChatMessageRef.current = query;
+    armChatResponseTimeout();
 
     try {
       if (textConversationRef.current?.isOpen() && sessionModeRef.current === 'chat') {
@@ -972,6 +1047,8 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
       sessionModeRef.current = 'chat';
       setChatSessionState('connecting');
       chatConversationIdRef.current = '';
+      currentChatStreamRef.current = null;
+      renderedChatEventIdsRef.current = new Set();
 
       const response = await fetch('/api/elevenlabs/session?mode=chat');
       const data = await response.json().catch(() => ({}));
@@ -987,9 +1064,6 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
         textOnly: true,
         connectionType: 'websocket' as const,
         overrides: {
-          agent: {
-            firstMessage: ''
-          },
           conversation: {
             textOnly: true
           }
@@ -1002,6 +1076,8 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
         onDisconnect: () => {
           setChatSessionState('idle');
           setChatLoading(false);
+          clearChatResponseTimeout();
+          awaitingChatResponseRef.current = false;
           textConversationRef.current = null;
           if (sessionModeRef.current === 'chat') {
             sessionModeRef.current = null;
@@ -1011,33 +1087,59 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
           setChatLoading(true);
         },
         onAgentChatResponsePart: (part: any) => {
+          const eventId = getChatEventId(part) || currentChatStreamRef.current?.eventId || '';
+
           if (part.type === 'start') {
             setChatLoading(true);
-            if (part.text) appendZaraChatMessage(part.text);
+            currentChatStreamRef.current = {
+              eventId,
+              text: getChatText(part)
+            };
             return;
           }
 
           if (part.type === 'delta') {
-            appendZaraChatMessage(part.text || '', { appendToLast: true });
+            const delta = getChatText(part);
+            if (currentChatStreamRef.current) {
+              currentChatStreamRef.current = {
+                ...currentChatStreamRef.current,
+                text: `${currentChatStreamRef.current.text}${delta}`
+              };
+            } else {
+              currentChatStreamRef.current = { eventId, text: delta };
+            }
             return;
           }
 
           if (part.type === 'stop') {
-            setChatLoading(false);
-            window.setTimeout(() => onRecordCreated({ source: 'chat' }), 1000);
+            const stream = currentChatStreamRef.current;
+            const streamEventId = stream?.eventId || eventId;
+            const streamText = stream?.text || getChatText(part);
+            currentChatStreamRef.current = null;
+
+            if (!handleZaraChatText(streamText, streamEventId)) {
+              setChatLoading(true);
+            }
           }
         },
         onMessage: (message: any) => {
+          const eventId = getChatEventId(message);
+          if (eventId && renderedChatEventIdsRef.current.has(eventId)) {
+            return;
+          }
+
           const role = message.role || (message.source === 'ai' ? 'agent' : message.source);
           if (role === 'agent' || message.source === 'ai') {
-            appendZaraChatMessage(message.message || '');
-            setChatLoading(false);
+            handleZaraChatText(getChatText(message), eventId);
           }
         },
-        onError: (message: string) => {
+        onError: (message: any) => {
           setChatSessionState('failed');
           setChatLoading(false);
-          appendZaraChatMessage(message || 'Sorry, I could not connect to Zara chat. Please try again.');
+          clearChatResponseTimeout();
+          awaitingChatResponseRef.current = false;
+          const errorText = typeof message === 'string' ? message : getChatText(message) || message?.message;
+          appendZaraChatMessage(errorText || 'Sorry, I could not connect to Zara chat. Please try again.');
           void saveTextChatLog('FAILED');
         }
       };
@@ -1064,6 +1166,8 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
     } catch (err: any) {
       console.error(err);
       pendingChatMessageRef.current = null;
+      awaitingChatResponseRef.current = false;
+      clearChatResponseTimeout();
       sessionModeRef.current = null;
       setChatSessionState('failed');
       setChatLoading(false);
