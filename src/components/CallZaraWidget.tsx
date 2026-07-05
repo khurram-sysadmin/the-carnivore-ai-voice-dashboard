@@ -189,22 +189,39 @@ const formatTranscriptText = (text: string) => {
     .trim();
 };
 
-const orderStatusLabels: Array<{ key: Order['status']; label: string }> = [
+const activeOrderStatusLabels: Array<{ key: Order['status']; label: string }> = [
   { key: 'RECEIVED', label: 'received' },
   { key: 'PREPARING', label: 'preparing' },
   { key: 'READY', label: 'ready' },
-  { key: 'OUT_FOR_DELIVERY', label: 'out for delivery' },
+  { key: 'OUT_FOR_DELIVERY', label: 'out for delivery' }
+];
+
+const historicalOrderStatusLabels: Array<{ key: Order['status']; label: string }> = [
   { key: 'COMPLETED', label: 'completed' },
   { key: 'CANCELLED', label: 'cancelled' }
 ];
 
-const reservationStatusLabels: Array<{ key: Reservation['status']; label: string }> = [
+const orderStatusLabels = [...activeOrderStatusLabels, ...historicalOrderStatusLabels];
+
+const currentReservationStatusLabels: Array<{ key: Reservation['status']; label: string }> = [
   { key: 'CONFIRMED', label: 'confirmed' },
   { key: 'MODIFIED', label: 'modified' },
+  { key: 'CANCELLED', label: 'cancelled' }
+];
+
+const historicalReservationStatusLabels: Array<{ key: Reservation['status']; label: string }> = [
   { key: 'COMPLETED', label: 'completed' },
-  { key: 'CANCELLED', label: 'cancelled' },
   { key: 'NO_SHOW', label: 'no show' }
 ];
+
+const reservationStatusLabels = [...currentReservationStatusLabels, ...historicalReservationStatusLabels];
+
+const activeOrderStatuses = new Set<Order['status']>(activeOrderStatusLabels.map(status => status.key));
+const currentReservationStatuses = new Set<Reservation['status']>(currentReservationStatusLabels.map(status => status.key));
+
+const queryAsksOrderHistory = (query: string) => /\b(?:completed?|cancel(?:led|ed)?|past|previous|old|history|all orders?|order history)\b/i.test(query);
+
+const queryAsksReservationHistory = (query: string) => /\b(?:completed?|no\s*-?\s*show|past|previous|old|history|all reservations?|all bookings?|reservation history|booking history)\b/i.test(query);
 
 const formatRecordNumber = (prefix: 'ORD' | 'RES', value = '') => {
   const clean = String(value || '').trim();
@@ -341,6 +358,11 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
       return 'Customer record summary: no orders or reservations are currently loaded for this account.';
     }
 
+    const activeOrderRecords = customerOrderRecords.filter(order => activeOrderStatuses.has(order.status));
+    const historicalOrderRecords = customerOrderRecords.filter(order => !activeOrderStatuses.has(order.status));
+    const currentReservationRecords = customerReservationRecords.filter(reservation => currentReservationStatuses.has(reservation.status));
+    const historicalReservationRecords = customerReservationRecords.filter(reservation => !currentReservationStatuses.has(reservation.status));
+
     const orderLines = customerOrderRecords.slice(0, 12).map(order =>
       `${formatRecordNumber('ORD', order.order_number)} | status ${order.status} | total ${formatCurrency(order.total_amount)} | type ${order.order_type || 'not set'} | items ${formatOrderItems(order)} | date ${formatDateForZara(order.created_at?.slice(0, 10))}`
     );
@@ -352,13 +374,18 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
     return [
       'Customer record lookup rules:',
       '- When the customer broadly asks about my orders, my order status, my reservations, or my bookings, do not choose only one record.',
-      '- First summarize the total count and status counts from the loaded customer records.',
+      '- Default broad order summaries count only active orders with statuses RECEIVED, PREPARING, READY, and OUT_FOR_DELIVERY.',
+      '- Do not count or mention COMPLETED or CANCELLED orders unless the customer asks for completed, cancelled, past, history, or all orders.',
+      '- Default broad reservation summaries count only CONFIRMED, MODIFIED, and CANCELLED reservations.',
+      '- Do not count or mention COMPLETED or NO_SHOW reservations unless the customer asks for completed, no-show, past, history, or all reservations.',
       '- Then ask which specific record they want details for. Ask for order ID, booking ID, item name, total, date, time, guest count, or other detail.',
       '- If the customer gives an ID or identifying detail, match it against the listed records. If multiple records match, ask a short clarifying question.',
-      `Loaded orders total: ${customerOrderRecords.length}. Order status counts: ${summarizeCounts(customerOrderRecords, orderStatusLabels)}.`,
-      orderLines.length ? `Loaded order records:\n${orderLines.join('\n')}` : 'Loaded order records: none.',
-      `Loaded reservations total: ${customerReservationRecords.length}. Reservation status counts: ${summarizeCounts(customerReservationRecords, reservationStatusLabels)}.`,
-      reservationLines.length ? `Loaded reservation records:\n${reservationLines.join('\n')}` : 'Loaded reservation records: none.'
+      `Default active orders total: ${activeOrderRecords.length}. Active order status counts: ${summarizeCounts(activeOrderRecords, activeOrderStatusLabels)}.`,
+      `Order history total, for explicit history requests only: ${historicalOrderRecords.length}. Historical order status counts: ${summarizeCounts(historicalOrderRecords, historicalOrderStatusLabels)}.`,
+      orderLines.length ? `Loaded order records for specific matching only:\n${orderLines.join('\n')}` : 'Loaded order records: none.',
+      `Default tracked reservations total: ${currentReservationRecords.length}. Current reservation status counts: ${summarizeCounts(currentReservationRecords, currentReservationStatusLabels)}.`,
+      `Reservation history total, for explicit history requests only: ${historicalReservationRecords.length}. Historical reservation status counts: ${summarizeCounts(historicalReservationRecords, historicalReservationStatusLabels)}.`,
+      reservationLines.length ? `Loaded reservation records for specific matching only:\n${reservationLines.join('\n')}` : 'Loaded reservation records: none.'
     ].join('\n');
   };
 
@@ -450,7 +477,16 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
       }
 
       if (queryLooksBroad(query) || !hasSpecificSignal) {
-        return `You have ${customerOrderRecords.length} orders: ${summarizeCounts(customerOrderRecords, orderStatusLabels)}. Which order do you want details for? Please share the order ID, item name, total, order type, or date.`;
+        const includeHistory = queryAsksOrderHistory(query);
+        const visibleOrders = includeHistory
+          ? customerOrderRecords
+          : customerOrderRecords.filter(order => activeOrderStatuses.has(order.status));
+        const visibleLabels = includeHistory ? orderStatusLabels : activeOrderStatusLabels;
+        const historyNote = includeHistory
+          ? ''
+          : ' Completed and cancelled orders are kept in history, and I can check them if you ask.';
+
+        return `You have ${visibleOrders.length} ${includeHistory ? 'orders including history' : 'active orders'}: ${summarizeCounts(visibleOrders, visibleLabels)}.${historyNote} Which order do you want details for? Please share the order ID, item name, total, order type, or date.`;
       }
     }
 
@@ -469,7 +505,16 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
       }
 
       if (queryLooksBroad(query) || !hasSpecificSignal) {
-        return `You have ${customerReservationRecords.length} reservations: ${summarizeCounts(customerReservationRecords, reservationStatusLabels)}. Which reservation do you want details for? Please share the booking ID, date, time, or guest count.`;
+        const includeHistory = queryAsksReservationHistory(query);
+        const visibleReservations = includeHistory
+          ? customerReservationRecords
+          : customerReservationRecords.filter(reservation => currentReservationStatuses.has(reservation.status));
+        const visibleLabels = includeHistory ? reservationStatusLabels : currentReservationStatusLabels;
+        const historyNote = includeHistory
+          ? ''
+          : ' Completed and no-show reservations are kept in history, and I can check them if you ask.';
+
+        return `You have ${visibleReservations.length} ${includeHistory ? 'reservations including history' : 'tracked reservations'}: ${summarizeCounts(visibleReservations, visibleLabels)}.${historyNote} Which reservation do you want details for? Please share the booking ID, date, time, or guest count.`;
       }
     }
 

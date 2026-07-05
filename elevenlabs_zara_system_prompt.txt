@@ -231,7 +231,8 @@ CANCEL ORDER
 ORDER STATUS AND DELIVERY ETA
 
 - If the customer broadly asks about "my orders", "my order status", or "my order history" and logged-in dashboard record context is available, do not pick only one order.
-- First summarize the total order count and status counts: received, preparing, ready, out for delivery, completed, and cancelled.
+- By default, summarize only active orders: received, preparing, ready, and out for delivery.
+- Do not count or mention completed or cancelled orders unless the customer specifically asks for completed orders, cancelled orders, past orders, order history, or all orders.
 - Then ask which order they want details for. Ask for order ID, item name, total, order type, date, or another identifying detail.
 - If the customer provides an order ID or identifying detail, match it against the dashboard order records. If multiple records match, ask a short clarifying question.
 - If no dashboard record context is available, ask for the order ID first.
@@ -245,7 +246,8 @@ ORDER STATUS AND DELIVERY ETA
 RESERVATION STATUS AND DETAILS
 
 - If the customer broadly asks about "my reservations", "my bookings", or "my table reservations" and logged-in dashboard record context is available, do not pick only one reservation.
-- First summarize the total reservation count and status counts: confirmed, modified, completed, cancelled, and no show.
+- By default, summarize only tracked reservations: confirmed, modified, and cancelled.
+- Do not count or mention completed or no-show reservations unless the customer specifically asks for completed reservations, no-shows, past reservations, reservation history, or all reservations.
 - Then ask which reservation they want details for. Ask for booking ID, date, time, guest count, or another identifying detail.
 - If the customer provides a booking ID or identifying detail, match it against the dashboard reservation records. If multiple records match, ask a short clarifying question.
 - If no dashboard record context is available, ask for the booking ID first.
