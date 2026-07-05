@@ -301,6 +301,7 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
   const [detailsFormMode, setDetailsFormMode] = useState<'contact' | 'callback'>('contact');
   const [detailsSent, setDetailsSent] = useState(false);
   const chatViewportRef = useRef<HTMLDivElement | null>(null);
+  const voiceTranscriptViewportRef = useRef<HTMLDivElement | null>(null);
   
   const callStartTime = useRef<number | null>(null);
   const isCallLogSaved = useRef<boolean>(false);
@@ -1310,6 +1311,22 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
     return () => window.cancelAnimationFrame(frame);
   }, [activeMode, chatMessages, chatLoading]);
 
+  // Keep live voice transcript pinned to the newest exchange without moving the page.
+  useEffect(() => {
+    if (activeMode !== 'voice' || callState.status !== 'active' || !voiceTranscriptViewportRef.current) return;
+
+    const frame = window.requestAnimationFrame(() => {
+      const viewport = voiceTranscriptViewportRef.current;
+      if (!viewport) return;
+      viewport.scrollTo({
+        top: viewport.scrollHeight,
+        behavior: 'smooth'
+      });
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [activeMode, callState.status, transcript]);
+
   const handleSendChatMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     const query = chatInput.trim();
@@ -1673,11 +1690,14 @@ return (
               </div>
 
               {/* Conversation Log preview */}
-              <div className="h-44 overflow-y-auto bg-zinc-950/80 rounded-xl p-4 border border-zinc-800 text-sm space-y-3 flex flex-col justify-end">
+              <div className="h-44 overflow-hidden bg-zinc-950/80 rounded-xl p-4 border border-zinc-800 text-sm space-y-3 flex flex-col justify-end">
                 {transcript.length === 0 ? (
                   <p className="text-zinc-600 italic text-center py-4">Live voice session established. Talk to Zara...</p>
                 ) : (
-                  <div className="space-y-3 overflow-y-auto max-h-full pr-1">
+                  <div
+                    ref={voiceTranscriptViewportRef}
+                    className="space-y-3 overflow-y-auto overscroll-contain max-h-full pr-1 scrollbar-thin"
+                  >
                     {transcript.slice(-4).map((entry, idx) => (
                       <div key={idx} className={`flex flex-col ${entry.speaker === 'Zara' ? 'items-start' : 'items-end'}`}>
                         <span className={`text-[10px] font-bold uppercase tracking-wider mb-0.5 ${entry.speaker === 'Zara' ? 'text-red-400' : 'text-zinc-400'}`}>
