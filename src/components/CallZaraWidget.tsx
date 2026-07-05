@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Phone, PhoneOff, Sparkles, RefreshCw, CheckCircle2, AlertCircle, Volume2, VolumeX, Mic, MessageSquare, Send, Loader2 } from 'lucide-react';
 import { useConversation } from '@elevenlabs/react';
 import { TextConversation } from '@elevenlabs/client';
+import type { Order, Reservation } from '../types';
 
 interface CallZaraWidgetProps {
   onRecordCreated: (record?: any) => void;
@@ -13,6 +14,8 @@ interface CallZaraWidgetProps {
     phone: string;
     email: string;
   } | null;
+  customerOrders?: Order[];
+  customerReservations?: Reservation[];
 }
 
 interface CallState {
@@ -186,7 +189,81 @@ const formatTranscriptText = (text: string) => {
     .trim();
 };
 
-export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onClearAction, customerAccount }: CallZaraWidgetProps) {
+const orderStatusLabels: Array<{ key: Order['status']; label: string }> = [
+  { key: 'RECEIVED', label: 'received' },
+  { key: 'PREPARING', label: 'preparing' },
+  { key: 'READY', label: 'ready' },
+  { key: 'OUT_FOR_DELIVERY', label: 'out for delivery' },
+  { key: 'COMPLETED', label: 'completed' },
+  { key: 'CANCELLED', label: 'cancelled' }
+];
+
+const reservationStatusLabels: Array<{ key: Reservation['status']; label: string }> = [
+  { key: 'CONFIRMED', label: 'confirmed' },
+  { key: 'MODIFIED', label: 'modified' },
+  { key: 'COMPLETED', label: 'completed' },
+  { key: 'CANCELLED', label: 'cancelled' },
+  { key: 'NO_SHOW', label: 'no show' }
+];
+
+const formatRecordNumber = (prefix: 'ORD' | 'RES', value = '') => {
+  const clean = String(value || '').trim();
+  if (!clean) return `${prefix}-UNKNOWN`;
+  return clean.toUpperCase().startsWith(`${prefix}-`) ? clean.toUpperCase() : `${prefix}-${clean}`;
+};
+
+const recordDigits = (value = '') => String(value || '').replace(/\D/g, '');
+
+const formatCurrency = (value: number | string | undefined) => {
+  const amount = Number(value || 0);
+  return `PKR ${amount.toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
+};
+
+const formatOrderItems = (order: Order) => {
+  if (order.items_summary) return order.items_summary;
+  if (!Array.isArray(order.items) || order.items.length === 0) return 'items not listed';
+
+  return order.items
+    .map(item => {
+      const quantity = Number(item.quantity || 1);
+      const weight = item.weight_grams ? ` - ${item.weight_grams}g` : '';
+      return `${quantity}x ${item.item_name}${weight}`;
+    })
+    .join(', ');
+};
+
+const formatDateForZara = (value = '') => {
+  if (!value) return 'date not set';
+  const [year, month, day] = value.split('-').map(Number);
+  if (!year || !month || !day) return value;
+  return new Date(year, month - 1, day).toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric'
+  });
+};
+
+const formatTimeForZara = (value = '') => {
+  if (!value) return 'time not set';
+  const [hourPart, minutePart = '0'] = value.split(':');
+  const hour = Number(hourPart);
+  const minute = Number(minutePart);
+  if (Number.isNaN(hour) || Number.isNaN(minute)) return value;
+  return new Date(2000, 0, 1, hour, minute).toLocaleTimeString('en-US', {
+    hour: 'numeric',
+    minute: '2-digit'
+  });
+};
+
+const summarizeCounts = <T extends { status: string }>(
+  records: T[],
+  statuses: Array<{ key: T['status']; label: string }>
+) => statuses.map(status => {
+  const count = records.filter(record => record.status === status.key).length;
+  return `${count} ${status.label}`;
+}).join(', ');
+
+export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onClearAction, customerAccount, customerOrders = [], customerReservations = [] }: CallZaraWidgetProps) {
   const [callState, setCallState] = useState<CallState>({ status: 'idle', message: 'Click to call Zara' });
   const [transcript, setTranscript] = useState<{ speaker: 'Zara' | 'You'; text: string }[]>([]);
   const [isMuted, setIsMuted] = useState(false);
@@ -244,6 +321,8 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
   const savedCustomerEmail = customerAccount?.email?.trim() || '';
   const hasLoggedInCustomerDetails = Boolean(savedCustomerPhone && savedCustomerEmail);
   const hasLoggedInCallbackDetails = Boolean(savedCustomerName && savedCustomerPhone);
+  const customerOrderRecords = Array.isArray(customerOrders) ? customerOrders : [];
+  const customerReservationRecords = Array.isArray(customerReservations) ? customerReservations : [];
 
   const getCustomerSessionOptions = () => ({
     userId: savedCustomerEmail || savedCustomerPhone || undefined,
@@ -256,6 +335,146 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
       customer_email: savedCustomerEmail
     }
   });
+
+  const buildCustomerRecordContext = () => {
+    if (!customerOrderRecords.length && !customerReservationRecords.length) {
+      return 'Customer record summary: no orders or reservations are currently loaded for this account.';
+    }
+
+    const orderLines = customerOrderRecords.slice(0, 12).map(order =>
+      `${formatRecordNumber('ORD', order.order_number)} | status ${order.status} | total ${formatCurrency(order.total_amount)} | type ${order.order_type || 'not set'} | items ${formatOrderItems(order)} | date ${formatDateForZara(order.created_at?.slice(0, 10))}`
+    );
+
+    const reservationLines = customerReservationRecords.slice(0, 12).map(reservation =>
+      `${formatRecordNumber('RES', reservation.reservation_number)} | status ${reservation.status} | ${formatDateForZara(reservation.reservation_date)} at ${formatTimeForZara(reservation.reservation_time)} | guests ${reservation.party_size}`
+    );
+
+    return [
+      'Customer record lookup rules:',
+      '- When the customer broadly asks about my orders, my order status, my reservations, or my bookings, do not choose only one record.',
+      '- First summarize the total count and status counts from the loaded customer records.',
+      '- Then ask which specific record they want details for. Ask for order ID, booking ID, item name, total, date, time, guest count, or other detail.',
+      '- If the customer gives an ID or identifying detail, match it against the listed records. If multiple records match, ask a short clarifying question.',
+      `Loaded orders total: ${customerOrderRecords.length}. Order status counts: ${summarizeCounts(customerOrderRecords, orderStatusLabels)}.`,
+      orderLines.length ? `Loaded order records:\n${orderLines.join('\n')}` : 'Loaded order records: none.',
+      `Loaded reservations total: ${customerReservationRecords.length}. Reservation status counts: ${summarizeCounts(customerReservationRecords, reservationStatusLabels)}.`,
+      reservationLines.length ? `Loaded reservation records:\n${reservationLines.join('\n')}` : 'Loaded reservation records: none.'
+    ].join('\n');
+  };
+
+  const queryLooksBroad = (query: string) => {
+    const lower = query.toLowerCase();
+    return (
+      lower.includes('my ') ||
+      lower.includes('about') ||
+      lower.includes('know') ||
+      lower.includes('show') ||
+      lower.includes('status') ||
+      lower.includes('details') ||
+      lower.includes('list') ||
+      lower.includes('history')
+    );
+  };
+
+  const getExplicitRecordDigits = (query: string, prefix: 'ord' | 'res') => {
+    const lower = query.toLowerCase();
+    const prefixed = lower.match(new RegExp(`\\b${prefix}\\s*-?\\s*(\\d{3,})\\b`));
+    if (prefixed?.[1]) return prefixed[1];
+
+    const labeled = lower.match(/\b(?:order|booking|reservation|id|number)\s*(?:id|number|no)?\s*(?:is|:|#|-)?\s*(\d{3,})\b/);
+    if (labeled?.[1]) return labeled[1];
+
+    return '';
+  };
+
+  const getNumbersInQuery = (query: string) => (query.match(/\d+(?:\.\d+)?/g) || []).map(Number);
+
+  const findMatchingOrders = (query: string) => {
+    const lower = query.toLowerCase();
+    const explicitDigits = getExplicitRecordDigits(query, 'ord');
+
+    if (explicitDigits) {
+      return customerOrderRecords.filter(order => recordDigits(order.order_number) === explicitDigits);
+    }
+
+    const numbers = getNumbersInQuery(query);
+    return customerOrderRecords.filter(order => {
+      const itemText = `${order.items_summary || ''} ${(order.items || []).map(item => `${item.item_name} ${item.weight_grams || ''}`).join(' ')}`.toLowerCase();
+      const itemMatch = (order.items || []).some(item => {
+        const name = item.item_name.toLowerCase();
+        return name.length > 2 && lower.includes(name);
+      }) || itemText.split(/[,|]/).some(part => part.trim().length > 3 && lower.includes(part.trim()));
+
+      const totalMatch = numbers.some(number => Math.abs(Number(order.total_amount || 0) - number) < 1);
+      const typeMatch = order.order_type && lower.includes(order.order_type);
+      return itemMatch || totalMatch || Boolean(typeMatch);
+    });
+  };
+
+  const findMatchingReservations = (query: string) => {
+    const lower = query.toLowerCase();
+    const explicitDigits = getExplicitRecordDigits(query, 'res');
+
+    if (explicitDigits) {
+      return customerReservationRecords.filter(reservation => recordDigits(reservation.reservation_number) === explicitDigits);
+    }
+
+    const numbers = getNumbersInQuery(query);
+    return customerReservationRecords.filter(reservation => {
+      const dateText = `${reservation.reservation_date} ${formatDateForZara(reservation.reservation_date)}`.toLowerCase();
+      const timeText = `${reservation.reservation_time} ${formatTimeForZara(reservation.reservation_time)}`.toLowerCase();
+      const guestMatch = numbers.includes(Number(reservation.party_size));
+      return lower.includes(dateText) || lower.includes(timeText) || guestMatch;
+    });
+  };
+
+  const getLocalRecordReply = (query: string) => {
+    const lower = query.toLowerCase();
+    const asksOrders = /\b(order|orders|ord|delivery|pickup|dine-in|dine in)\b/.test(lower);
+    const asksReservations = /\b(reservation|reservations|booking|bookings|table|tables|res)\b/.test(lower);
+
+    if (!asksOrders && !asksReservations) return '';
+
+    if (asksOrders) {
+      const matches = findMatchingOrders(query);
+      const hasSpecificSignal = getExplicitRecordDigits(query, 'ord') || matches.length > 0;
+
+      if (matches.length === 1) {
+        const order = matches[0];
+        return `${formatRecordNumber('ORD', order.order_number)} is ${order.status.toLowerCase().replaceAll('_', ' ')}. Items: ${formatOrderItems(order)}. Total: ${formatCurrency(order.total_amount)}. Order type: ${order.order_type || 'not set'}.`;
+      }
+
+      if (matches.length > 1) {
+        const choices = matches.slice(0, 4).map(order => `${formatRecordNumber('ORD', order.order_number)} (${order.status.toLowerCase().replaceAll('_', ' ')}, ${formatOrderItems(order)}, ${formatCurrency(order.total_amount)})`).join('; ');
+        return `I found ${matches.length} matching orders: ${choices}. Which order do you want details for? Please share the order ID.`;
+      }
+
+      if (queryLooksBroad(query) || !hasSpecificSignal) {
+        return `You have ${customerOrderRecords.length} orders: ${summarizeCounts(customerOrderRecords, orderStatusLabels)}. Which order do you want details for? Please share the order ID, item name, total, order type, or date.`;
+      }
+    }
+
+    if (asksReservations) {
+      const matches = findMatchingReservations(query);
+      const hasSpecificSignal = getExplicitRecordDigits(query, 'res') || matches.length > 0;
+
+      if (matches.length === 1) {
+        const reservation = matches[0];
+        return `${formatRecordNumber('RES', reservation.reservation_number)} is ${reservation.status.toLowerCase().replaceAll('_', ' ')} for ${formatDateForZara(reservation.reservation_date)} at ${formatTimeForZara(reservation.reservation_time)} for ${reservation.party_size} guests.`;
+      }
+
+      if (matches.length > 1) {
+        const choices = matches.slice(0, 4).map(reservation => `${formatRecordNumber('RES', reservation.reservation_number)} (${reservation.status.toLowerCase().replaceAll('_', ' ')}, ${formatDateForZara(reservation.reservation_date)} ${formatTimeForZara(reservation.reservation_time)}, ${reservation.party_size} guests)`).join('; ');
+        return `I found ${matches.length} matching reservations: ${choices}. Which reservation do you want details for? Please share the booking ID.`;
+      }
+
+      if (queryLooksBroad(query) || !hasSpecificSignal) {
+        return `You have ${customerReservationRecords.length} reservations: ${summarizeCounts(customerReservationRecords, reservationStatusLabels)}. Which reservation do you want details for? Please share the booking ID, date, time, or guest count.`;
+      }
+    }
+
+    return '';
+  };
 
   const sendSavedAccountDetailsToZara = (mode: 'contact' | 'callback') => {
     const canUseSavedDetails = mode === 'callback' ? hasLoggedInCallbackDetails : hasLoggedInCustomerDetails;
@@ -304,7 +523,8 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
       savedCustomerEmail ? `Account email: ${savedCustomerEmail}` : '',
       hasLoggedInCustomerDetails
         ? 'Use the account phone and email automatically for every task, including orders, reservations, lookups, modifications, cancellations, menu email, feedback, and escalation. Do not ask for name, phone, or email again unless the customer says the saved account detail is wrong.'
-        : 'If phone or email is missing, ask for only the missing contact detail.'
+        : 'If phone or email is missing, ask for only the missing contact detail.',
+      buildCustomerRecordContext()
     ].filter(Boolean).join('\n');
 
     try {
@@ -325,7 +545,8 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
       savedCustomerEmail ? `Account email: ${savedCustomerEmail}` : '',
       hasLoggedInCustomerDetails
         ? 'Use the account phone and email automatically for every task. Do not ask for name, phone, or email again unless the customer says the saved account detail is wrong.'
-        : 'If phone or email is missing, ask for only the missing contact detail.'
+        : 'If phone or email is missing, ask for only the missing contact detail.',
+      buildCustomerRecordContext()
     ].filter(Boolean).join('\n');
   };
 
@@ -1061,6 +1282,17 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
 
     setChatInput('');
     appendCustomerChatMessage(query);
+
+    const localRecordReply = getLocalRecordReply(query);
+    if (localRecordReply) {
+      appendZaraChatMessage(localRecordReply);
+      window.setTimeout(() => {
+        void saveTextChatLog('COMPLETED');
+        onRecordCreated({ source: 'chat' });
+      }, 250);
+      return;
+    }
+
     setChatLoading(true);
     pendingChatMessageRef.current = query;
     armChatResponseTimeout();

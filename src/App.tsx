@@ -1371,6 +1371,8 @@ export default function App() {
                       preSelectedAction={selectedVoiceAction}
                       onClearAction={() => setSelectedVoiceAction('')}
                       customerAccount={customerAccount}
+                      customerOrders={orders}
+                      customerReservations={reservations}
                     />
 
                     {/* Today's Gourmet Specials Grid */}
