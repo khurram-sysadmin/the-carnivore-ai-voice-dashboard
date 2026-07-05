@@ -206,7 +206,7 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
   const [detailsFormVisible, setDetailsFormVisible] = useState(false);
   const [detailsFormMode, setDetailsFormMode] = useState<'contact' | 'callback'>('contact');
   const [detailsSent, setDetailsSent] = useState(false);
-  const chatBottomRef = useRef<HTMLDivElement | null>(null);
+  const chatViewportRef = useRef<HTMLDivElement | null>(null);
   
   const callStartTime = useRef<number | null>(null);
   const isCallLogSaved = useRef<boolean>(false);
@@ -220,6 +220,8 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
   const chatResponseTimeoutRef = useRef<number | null>(null);
   const currentChatStreamRef = useRef<{ eventId: string; text: string } | null>(null);
   const renderedChatEventIdsRef = useRef<Set<string>>(new Set());
+  const ignoredChatEventIdsRef = useRef<Set<string>>(new Set());
+  const skippedInitialChatGreetingRef = useRef(false);
   const conversationIdRef = useRef<string>('');
   const sessionAgentIdRef = useRef<string>('');
   const chatConversationIdRef = useRef<string>('');
@@ -418,9 +420,30 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
     );
   };
 
+  const isGenericInitialZaraGreeting = (content: string) => {
+    const lower = content.toLowerCase();
+    return (
+      (lower.includes('thanks for calling the carnivore') || lower.includes('hi i am zara')) &&
+      lower.includes('how can i help')
+    );
+  };
+
   const handleZaraChatText = (content: string, eventId = '', options: { appendToLast?: boolean } = {}) => {
     const text = getChatText(content);
     if (!text.trim()) return false;
+
+    const hasCustomerMessage = chatMessagesRef.current.some(message => message.role === 'customer');
+    const hasZaraMessage = chatMessagesRef.current.some(message => message.role === 'zara');
+    if (
+      hasCustomerMessage &&
+      !hasZaraMessage &&
+      !skippedInitialChatGreetingRef.current &&
+      isGenericInitialZaraGreeting(text)
+    ) {
+      skippedInitialChatGreetingRef.current = true;
+      if (eventId) ignoredChatEventIdsRef.current.add(eventId);
+      return false;
+    }
 
     const appended = appendZaraChatMessage(text, options);
     if (appended) {
@@ -1015,12 +1038,21 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
     }
   };
 
-  // Auto-scroll chat to bottom
+  // Keep chat movement inside the message viewport so the page itself does not jump.
   useEffect(() => {
-    if (chatBottomRef.current) {
-      chatBottomRef.current.scrollIntoView({ behavior: 'smooth' });
-    }
-  }, [chatMessages, chatLoading]);
+    if (activeMode !== 'chat' || !chatViewportRef.current) return;
+
+    const frame = window.requestAnimationFrame(() => {
+      const viewport = chatViewportRef.current;
+      if (!viewport) return;
+      viewport.scrollTo({
+        top: viewport.scrollHeight,
+        behavior: 'smooth'
+      });
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [activeMode, chatMessages, chatLoading]);
 
   const handleSendChatMessage = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1049,6 +1081,8 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
       chatConversationIdRef.current = '';
       currentChatStreamRef.current = null;
       renderedChatEventIdsRef.current = new Set();
+      ignoredChatEventIdsRef.current = new Set();
+      skippedInitialChatGreetingRef.current = false;
 
       const response = await fetch('/api/elevenlabs/session?mode=chat');
       const data = await response.json().catch(() => ({}));
@@ -1124,7 +1158,7 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
         },
         onMessage: (message: any) => {
           const eventId = getChatEventId(message);
-          if (eventId && renderedChatEventIdsRef.current.has(eventId)) {
+          if (eventId && (renderedChatEventIdsRef.current.has(eventId) || ignoredChatEventIdsRef.current.has(eventId))) {
             return;
           }
 
@@ -1535,10 +1569,13 @@ return (
         </div>
       ) : (
         /* Text Chat UI Mode */
-        <div className="min-h-[300px] flex flex-col justify-between gap-4">
+        <div className="h-[420px] max-h-[70vh] min-h-[340px] flex flex-col gap-4">
           
           {/* Chat Messages viewport */}
-          <div className="flex-1 min-h-[220px] max-h-[300px] overflow-y-auto bg-zinc-950/80 rounded-xl p-4 border border-zinc-800 text-sm space-y-3 scrollbar-thin">
+          <div
+            ref={chatViewportRef}
+            className="flex-1 min-h-0 overflow-y-auto overscroll-contain bg-zinc-950/80 rounded-xl p-4 border border-zinc-800 text-sm space-y-3 scrollbar-thin"
+          >
             {chatMessages.length === 0 && !chatLoading && (
               <div className="h-full min-h-[180px] flex flex-col items-center justify-center text-center px-5">
                 <div className="w-10 h-10 rounded-full bg-red-600/10 border border-red-500/30 flex items-center justify-center mb-3">
@@ -1574,7 +1611,6 @@ return (
                 </div>
               </div>
             )}
-            <div ref={chatBottomRef} />
           </div>
 
           {/* Chat input box */}
