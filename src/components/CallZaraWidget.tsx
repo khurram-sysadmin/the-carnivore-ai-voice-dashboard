@@ -181,12 +181,7 @@ const transliterateDevanagariWord = (word: string) => {
 };
 
 const formatTranscriptText = (text: string) => {
-  if (!/[\u0900-\u097F]/.test(text)) return text;
-
-  return text
-    .replace(/[\u0900-\u097F]+/g, token => transliterateDevanagariWord(token))
-    .replace(/\s+/g, ' ')
-    .trim();
+  return text.replace(/\s+/g, ' ').trim();
 };
 
 const activeOrderStatusLabels: Array<{ key: Order['status']; label: string }> = [
@@ -1732,7 +1727,7 @@ return (
                         <span className={`text-[10px] font-bold uppercase tracking-wider mb-0.5 ${entry.speaker === 'Zara' ? 'text-red-400' : 'text-zinc-400'}`}>
                           {entry.speaker}
                         </span>
-                        <p className={`px-3 py-2 rounded-xl max-w-[85%] leading-relaxed ${entry.speaker === 'Zara' ? 'bg-zinc-800 text-zinc-100 rounded-tl-none' : 'bg-red-600 text-white rounded-tr-none'}`}>
+                        <p dir="auto" className={`px-3 py-2 rounded-xl max-w-[85%] leading-relaxed ${entry.speaker === 'Zara' ? 'bg-zinc-800 text-zinc-100 rounded-tl-none' : 'bg-red-600 text-white rounded-tr-none'}`}>
                           {entry.text}
                         </p>
                       </div>
@@ -1911,7 +1906,7 @@ return (
                   <span className={`text-[9px] font-bold uppercase tracking-wider mb-0.5 ${isZara ? 'text-red-400' : 'text-zinc-400'}`}>
                     {isZara ? 'Zara (AI)' : 'You'}
                   </span>
-                  <p className={`px-3 py-2 rounded-xl max-w-[85%] leading-relaxed text-xs ${isZara ? 'bg-zinc-800 text-zinc-100 rounded-tl-none border border-zinc-700/50' : 'bg-red-600 text-white rounded-tr-none border border-red-700'}`}>
+                  <p dir="auto" className={`px-3 py-2 rounded-xl max-w-[85%] leading-relaxed text-xs ${isZara ? 'bg-zinc-800 text-zinc-100 rounded-tl-none border border-zinc-700/50' : 'bg-red-600 text-white rounded-tr-none border border-red-700'}`}>
                     {msg.content}
                   </p>
                 </div>
