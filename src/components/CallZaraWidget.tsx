@@ -481,12 +481,7 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
         const visibleOrders = includeHistory
           ? customerOrderRecords
           : customerOrderRecords.filter(order => activeOrderStatuses.has(order.status));
-        const visibleLabels = includeHistory ? orderStatusLabels : activeOrderStatusLabels;
-        const historyNote = includeHistory
-          ? ''
-          : ' Completed and cancelled orders are kept in history, and I can check them if you ask.';
-
-        return `You have ${visibleOrders.length} ${includeHistory ? 'orders including history' : 'active orders'}: ${summarizeCounts(visibleOrders, visibleLabels)}.${historyNote} Which order do you want details for? Please share the order ID, item name, total, order type, or date.`;
+        return `You have ${visibleOrders.length} ${includeHistory ? 'orders' : 'active orders'}. Please tell me your order ID to know about your order.`;
       }
     }
 
@@ -509,12 +504,7 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
         const visibleReservations = includeHistory
           ? customerReservationRecords
           : customerReservationRecords.filter(reservation => currentReservationStatuses.has(reservation.status));
-        const visibleLabels = includeHistory ? reservationStatusLabels : currentReservationStatusLabels;
-        const historyNote = includeHistory
-          ? ''
-          : ' Completed and no-show reservations are kept in history, and I can check them if you ask.';
-
-        return `You have ${visibleReservations.length} ${includeHistory ? 'reservations including history' : 'tracked reservations'}: ${summarizeCounts(visibleReservations, visibleLabels)}.${historyNote} Which reservation do you want details for? Please share the booking ID, date, time, or guest count.`;
+        return `You have ${visibleReservations.length} reservations. Please tell me your booking ID to know about your reservation.`;
       }
     }
 
