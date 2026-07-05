@@ -223,6 +223,16 @@ const queryAsksOrderHistory = (query: string) => /\b(?:completed?|cancel(?:led|e
 
 const queryAsksReservationHistory = (query: string) => /\b(?:completed?|no\s*-?\s*show|past|previous|old|history|all reservations?|all bookings?|reservation history|booking history)\b/i.test(query);
 
+const queryAsksForRecordIds = (query: string, recordType: 'order' | 'reservation') => {
+  const lower = query.toLowerCase();
+  const asksForIds = /\b(?:ids?|numbers?|no\.?|nos\.?)\b/.test(lower);
+  if (!asksForIds) return false;
+
+  return recordType === 'order'
+    ? /\b(?:order|orders|ord)\b/.test(lower)
+    : /\b(?:reservation|reservations|booking|bookings|res)\b/.test(lower);
+};
+
 const formatRecordNumber = (prefix: 'ORD' | 'RES', value = '') => {
   const clean = String(value || '').trim();
   if (!clean) return `${prefix}-UNKNOWN`;
@@ -379,7 +389,10 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
       '- Do not count or mention COMPLETED or CANCELLED orders unless the customer asks for completed, cancelled, past, history, or all orders.',
       '- Default broad reservation summaries count only CONFIRMED, MODIFIED, and CANCELLED reservations.',
       '- Do not count or mention COMPLETED or NO_SHOW reservations unless the customer asks for completed, no-show, past, history, or all reservations.',
-      '- Then ask which specific record they want details for. Ask for order ID, booking ID, item name, total, date, time, guest count, or other detail.',
+      '- In broad replies, never list or suggest order IDs or booking IDs unless the customer explicitly asks for IDs or numbers.',
+      '- For broad order questions, say only: You have [number] active orders. Please tell me your order ID to know about your order.',
+      '- For broad reservation questions, say only: You have [number] reservations. Please tell me your booking ID to know about your reservation.',
+      '- If the customer explicitly asks for active order IDs, active reservation IDs, or record numbers, list only the requested IDs without item details.',
       '- If the customer gives an ID or identifying detail, match it against the listed records. If multiple records match, ask a short clarifying question.',
       `Default active orders total: ${activeOrderRecords.length}. Active order status counts: ${summarizeCounts(activeOrderRecords, activeOrderStatusLabels)}.`,
       `Order history total, for explicit history requests only: ${historicalOrderRecords.length}. Historical order status counts: ${summarizeCounts(historicalOrderRecords, historicalOrderStatusLabels)}.`,
@@ -482,6 +495,14 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
         const visibleOrders = includeHistory
           ? customerOrderRecords
           : customerOrderRecords.filter(order => activeOrderStatuses.has(order.status));
+
+        if (queryAsksForRecordIds(query, 'order')) {
+          const ids = visibleOrders.map(order => formatRecordNumber('ORD', order.order_number)).join(', ');
+          return visibleOrders.length
+            ? `Your ${includeHistory ? 'order' : 'active order'} IDs are ${ids}. Which one do you want details for?`
+            : `You have no ${includeHistory ? 'orders' : 'active orders'} right now.`;
+        }
+
         return `You have ${visibleOrders.length} ${includeHistory ? 'orders' : 'active orders'}. Please tell me your order ID to know about your order.`;
       }
     }
@@ -505,6 +526,14 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
         const visibleReservations = includeHistory
           ? customerReservationRecords
           : customerReservationRecords.filter(reservation => currentReservationStatuses.has(reservation.status));
+
+        if (queryAsksForRecordIds(query, 'reservation')) {
+          const ids = visibleReservations.map(reservation => formatRecordNumber('RES', reservation.reservation_number)).join(', ');
+          return visibleReservations.length
+            ? `Your reservation IDs are ${ids}. Which one do you want details for?`
+            : `You have no reservations right now.`;
+        }
+
         return `You have ${visibleReservations.length} reservations. Please tell me your booking ID to know about your reservation.`;
       }
     }
