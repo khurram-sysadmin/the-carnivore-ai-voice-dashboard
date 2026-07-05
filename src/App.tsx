@@ -141,10 +141,11 @@ export default function App() {
   const [selectedCallLog, setSelectedCallLog] = useState<CallLog | null>(null);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
 
-  // Playback States
-  const [isCallPlaying, setIsCallPlaying] = useState(false);
-  const [callProgress, setCallProgress] = useState(0);
-  const [playbackSpeed, setPlaybackSpeed] = useState<number>(1);
+  // Secure owner-side call recording playback
+  const [callAudioObjectUrl, setCallAudioObjectUrl] = useState('');
+  const [callAudioLoading, setCallAudioLoading] = useState(false);
+  const [callAudioError, setCallAudioError] = useState('');
+  const [callAudioRetryKey, setCallAudioRetryKey] = useState(0);
 
   // Voice Interaction Helpers
   const [selectedVoiceAction, setSelectedVoiceAction] = useState<string>('');
@@ -163,6 +164,12 @@ export default function App() {
   const [postCallContext, setPostCallContext] = useState<any>(null);
   const [showElevenLabsChecklist, setShowElevenLabsChecklist] = useState(false);
   const lastPendingEscalationCount = useRef<number | null>(null);
+
+  const selectedAudioSource = selectedCallLog?.audio_url || (
+    selectedCallLog?.conversation_id
+      ? `/api/call-logs/${encodeURIComponent(selectedCallLog.conversation_id)}/audio`
+      : ''
+  );
 
   // Revenue filters state
   const [revDateFilter, setRevDateFilter] = useState('');
@@ -227,7 +234,7 @@ export default function App() {
       // Call Logs
       fetch('/api/call-logs')
         .then(r => r.json())
-        .then(setCallLogs)
+        .then(data => setCallLogs(Array.isArray(data) ? data : []))
         .catch(e => console.error("Error loading call logs:", e));
     } else if (customerAccount) {
       Promise.all([
@@ -294,33 +301,83 @@ export default function App() {
     }
   }, [callLogs, selectedCallLog]);
 
-  // Reset and handle playing simulation
   useEffect(() => {
-    setIsCallPlaying(false);
-    setCallProgress(0);
-  }, [selectedCallLog]);
+    if (!selectedCallLog) return;
+
+    const latest = callLogs.find(log =>
+      log.id === selectedCallLog.id ||
+      (log.conversation_id && log.conversation_id === selectedCallLog.conversation_id)
+    );
+
+    const hasChanged = latest && [
+      'customer_name',
+      'customer_phone',
+      'duration_seconds',
+      'transcript',
+      'transcript_summary',
+      'audio_url',
+      'has_audio',
+      'status',
+      'created_at'
+    ].some(key => (latest as any)[key] !== (selectedCallLog as any)[key]);
+
+    if (latest && hasChanged) {
+      setSelectedCallLog(latest);
+    }
+  }, [callLogs, selectedCallLog?.id, selectedCallLog?.conversation_id]);
 
   useEffect(() => {
-    let interval: NodeJS.Timeout | null = null;
-    if (isCallPlaying && selectedCallLog) {
-      const totalSeconds = selectedCallLog.duration_seconds || 60;
-      const stepMs = 100; // update 10 times a second for super smooth progress
-      const progressPerStep = (stepMs / (totalSeconds * 1000)) * 100 * playbackSpeed;
-      
-      interval = setInterval(() => {
-        setCallProgress(prev => {
-          if (prev >= 100) {
-            setIsCallPlaying(false);
-            return 100;
-          }
-          return Math.min(prev + progressPerStep, 100);
-        });
-      }, stepMs);
+    let objectUrl = '';
+    const controller = new AbortController();
+
+    setCallAudioObjectUrl('');
+    setCallAudioError('');
+
+    if (!selectedAudioSource) {
+      setCallAudioLoading(false);
+      return () => controller.abort();
     }
+
+    setCallAudioLoading(true);
+
+    fetch(selectedAudioSource, {
+      credentials: 'include',
+      cache: 'no-store',
+      signal: controller.signal
+    })
+      .then(async response => {
+        if (!response.ok) {
+          let message = `Recording unavailable (${response.status}).`;
+          const text = await response.text();
+          try {
+            const payload = JSON.parse(text);
+            if (payload?.error) message = payload.error;
+          } catch {
+            if (text) message = text.slice(0, 180);
+          }
+          throw new Error(message);
+        }
+
+        const blob = await response.blob();
+        if (!blob.size) throw new Error('Recording is empty or still processing.');
+
+        objectUrl = URL.createObjectURL(blob);
+        setCallAudioObjectUrl(objectUrl);
+      })
+      .catch(error => {
+        if (error?.name !== 'AbortError') {
+          setCallAudioError(error?.message || 'Could not load this recording yet.');
+        }
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setCallAudioLoading(false);
+      });
+
     return () => {
-      if (interval) clearInterval(interval);
+      controller.abort();
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [isCallPlaying, selectedCallLog, playbackSpeed]);
+  }, [selectedAudioSource, selectedCallLog?.id, callAudioRetryKey]);
 
   // Check auth status on mount
   useEffect(() => {
@@ -2437,7 +2494,9 @@ export default function App() {
                                   </span>
                                 </div>
                                 <p className="text-xs text-zinc-500 truncate mt-1">
-                                  {log.transcript ? log.transcript.replace(/Zara:|You:/g, '') : 'No transcript recorded.'}
+                                  {(log.transcript || log.transcript_summary)
+                                    ? (log.transcript || log.transcript_summary || '').replace(/Zara:|You:/g, '')
+                                    : 'No transcript recorded yet.'}
                                 </p>
                                 <div className="flex items-center gap-3 mt-2 flex-wrap">
                                   <span className="text-[10px] text-zinc-400 flex items-center gap-1">
@@ -2477,7 +2536,7 @@ export default function App() {
                       key={selectedCallLog.id}
                       initial={{ opacity: 0, x: 15 }}
                       animate={{ opacity: 1, x: 0 }}
-                      className="bg-white border border-zinc-200 rounded-2xl p-6 shadow-sm flex flex-col h-[750px]"
+                      className="bg-white border border-zinc-200 rounded-2xl p-4 sm:p-6 shadow-sm flex flex-col min-h-[620px] xl:h-[760px]"
                     >
                       {/* Transcript Header */}
                       <div className="border-b border-zinc-150 pb-4 mb-4">
@@ -2505,7 +2564,8 @@ export default function App() {
 
                       {/* AI Intelligence Insights Dashboard */}
                       {(() => {
-                        const insights = getCallInsights(selectedCallLog.transcript || '', selectedCallLog.status);
+                        const transcriptText = selectedCallLog.transcript || selectedCallLog.transcript_summary || '';
+                        const insights = getCallInsights(transcriptText, selectedCallLog.status);
                         return (
                           <div className="mb-4 bg-zinc-50 rounded-xl p-3 border border-zinc-200 space-y-3">
                             <div className="flex items-center justify-between gap-2 flex-wrap">
@@ -2540,34 +2600,63 @@ export default function App() {
                       })()}
 
                       {/* Real ElevenLabs Recording */}
-                      {selectedCallLog.audio_url && (
-                        <div className="mb-4 bg-zinc-950 text-white rounded-2xl p-4 border border-zinc-800 shadow-lg space-y-2">
-                          <div className="flex items-center justify-between gap-3">
+                      {(selectedAudioSource || selectedCallLog.has_audio) && (
+                        <div className="mb-4 bg-zinc-950 text-white rounded-2xl p-4 border border-zinc-800 shadow-lg space-y-3">
+                          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                             <span className="text-[10px] font-black uppercase tracking-wider text-zinc-400 flex items-center gap-1">
                               <Volume2 className="w-3.5 h-3.5 text-red-500" />
-                              ElevenLabs Recording
+                              Call Recording
                             </span>
                             <span className="text-[9px] font-bold uppercase text-emerald-400">
-                              Real Audio
+                              Supabase log + ElevenLabs audio
                             </span>
                           </div>
-                          <audio
-                            controls
-                            preload="none"
-                            src={selectedCallLog.audio_url}
-                            className="w-full h-10 rounded-lg"
-                          >
-                            Your browser does not support audio playback.
-                          </audio>
+
+                          {callAudioLoading ? (
+                            <div className="rounded-xl border border-zinc-800 bg-zinc-900/80 p-4">
+                              <div className="h-3 w-1/3 bg-zinc-800 rounded animate-pulse mb-3" />
+                              <div className="h-10 bg-zinc-800 rounded-xl animate-pulse" />
+                            </div>
+                          ) : callAudioError ? (
+                            <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                              <div>
+                                <p className="text-xs font-bold text-amber-100">Recording is not playable yet.</p>
+                                <p className="text-[10px] text-amber-200/80 mt-1">{callAudioError}</p>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => setCallAudioRetryKey(key => key + 1)}
+                                className="inline-flex items-center justify-center gap-1 rounded-lg bg-white text-zinc-950 px-3 py-2 text-[10px] font-black uppercase tracking-wider hover:bg-zinc-100 transition-colors"
+                              >
+                                <RefreshCw className="w-3.5 h-3.5" />
+                                Retry
+                              </button>
+                            </div>
+                          ) : callAudioObjectUrl ? (
+                            <audio
+                              controls
+                              preload="metadata"
+                              src={callAudioObjectUrl}
+                              className="w-full h-10 rounded-lg"
+                            >
+                              Your browser does not support audio playback.
+                            </audio>
+                          ) : (
+                            <div className="rounded-xl border border-zinc-800 bg-zinc-900/80 p-4 text-xs text-zinc-400">
+                              Recording metadata is saved. Audio will appear here when ElevenLabs finishes processing it.
+                            </div>
+                          )}
+
                           <p className="text-[10px] text-zinc-500">
-                            Playback is streamed securely from ElevenLabs for owner sessions.
+                            Transcript and recording metadata are saved in Supabase. Playback is fetched securely for owner sessions.
                           </p>
                         </div>
                       )}
                       {/* Chat Messages */}
-                      <div className="flex-1 overflow-y-auto space-y-4 pr-1 font-sans text-xs scrollbar-thin">
-                        {selectedCallLog.transcript ? (() => {
-                          const lines = selectedCallLog.transcript.split('\n').filter(line => line.trim());
+                      <div className="flex-1 overflow-y-auto max-h-[460px] xl:max-h-none space-y-4 pr-1 font-sans text-xs scrollbar-thin">
+                        {(selectedCallLog.transcript || selectedCallLog.transcript_summary) ? (() => {
+                          const transcriptText = selectedCallLog.transcript || `Zara: ${selectedCallLog.transcript_summary}`;
+                          const lines = transcriptText.split('\n').filter(line => line.trim());
                           return lines.map((line, idx) => {
                             const isZara = line.trim().startsWith('Zara:');
                             const messageText = line.replace(/^(Zara:|You:)/i, '').trim();

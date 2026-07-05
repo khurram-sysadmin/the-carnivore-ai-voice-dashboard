@@ -1972,6 +1972,25 @@ const insertSupabaseVariant = async (tableName: string, variants: any[]) => {
   return null;
 };
 
+const updateSupabaseVariant = async (tableName: string, id: any, variants: any[]) => {
+  if (!supabase || missingTables.has(tableName) || !id) return null;
+
+  let lastError: any = null;
+  for (const payload of variants) {
+    const { data, error } = await supabase
+      .from(tableName)
+      .update(payload)
+      .eq("id", id)
+      .select();
+
+    if (!error && data && data[0]) return data[0];
+    lastError = error;
+  }
+
+  handleSupabaseError(tableName, lastError, "update");
+  return null;
+};
+
 const callLogInsertVariants = (callLog: any) => [
   {
     conversation_id: callLog.conversation_id,
@@ -1982,6 +2001,7 @@ const callLogInsertVariants = (callLog: any) => [
     transcript: callLog.transcript,
     transcript_summary: callLog.transcript_summary,
     audio_url: callLog.audio_url,
+    has_audio: callLog.has_audio,
     main_language: callLog.main_language,
     source: callLog.source,
     status: callLog.status,
@@ -1996,7 +2016,19 @@ const callLogInsertVariants = (callLog: any) => [
     transcript: callLog.transcript,
     transcript_summary: callLog.transcript_summary,
     audio_url: callLog.audio_url,
+    has_audio: callLog.has_audio,
     source: callLog.source,
+    status: callLog.status
+  },
+  {
+    conversation_id: callLog.conversation_id,
+    agent_id: callLog.agent_id,
+    customer_name: callLog.customer_name,
+    customer_phone: callLog.customer_phone,
+    duration_seconds: callLog.duration_seconds,
+    transcript: callLog.transcript,
+    transcript_summary: callLog.transcript_summary,
+    audio_url: callLog.audio_url,
     status: callLog.status
   },
   {
@@ -2016,6 +2048,45 @@ const callLogInsertVariants = (callLog: any) => [
     status: callLog.status
   }
 ];
+
+const syncCallLogsToSupabase = async (liveLogs: DashboardCallLog[]) => {
+  if (!supabase || missingTables.has("call_logs") || liveLogs.length === 0) return [];
+
+  const synced: DashboardCallLog[] = [];
+
+  for (const liveLog of liveLogs) {
+    if (!liveLog.conversation_id) continue;
+
+    try {
+      const { data: existingRows, error } = await supabase
+        .from("call_logs")
+        .select("*")
+        .eq("conversation_id", liveLog.conversation_id)
+        .order("created_at", { ascending: false })
+        .limit(1);
+
+      if (error) {
+        handleSupabaseError("call_logs", error, "conversation-sync-check");
+        continue;
+      }
+
+      const existing = existingRows?.[0] ? normalizeSavedCallLog(existingRows[0]) : null;
+      const merged = existing ? mergeCallLogs(existing, liveLog) : liveLog;
+
+      if (existingRows?.[0]?.id) {
+        const updated = await updateSupabaseVariant("call_logs", existingRows[0].id, callLogInsertVariants(merged));
+        synced.push(updated ? normalizeSavedCallLog(updated) : merged);
+      } else {
+        const inserted = await insertSupabaseVariant("call_logs", callLogInsertVariants(merged));
+        synced.push(inserted ? normalizeSavedCallLog(inserted) : merged);
+      }
+    } catch (error) {
+      console.warn(`Unable to sync call log ${liveLog.conversation_id} to Supabase:`, error);
+    }
+  }
+
+  return synced;
+};
 
 const escalationInsertVariants = (escalation: any) => [
   {
@@ -3087,6 +3158,7 @@ app.patch("/api/escalations/:id", requireOwnerAuth, async (req, res) => {
 app.get("/api/call-logs", requireOwnerAuth, async (req, res) => {
   const { configured: elevenLabsConfigured } = getElevenLabsConfig();
   const elevenLabsLogs = await fetchElevenLabsCallLogs();
+  const syncedElevenLabsLogs = await syncCallLogsToSupabase(elevenLabsLogs);
   let savedLogs: DashboardCallLog[] = [];
 
   if (supabase && !missingTables.has("call_logs")) {
@@ -3111,7 +3183,7 @@ app.get("/api/call-logs", requireOwnerAuth, async (req, res) => {
     mergedByKey.set(key, existing ? mergeCallLogs(existing, log) : log);
   };
 
-  elevenLabsLogs.forEach(addMergedLog);
+  (syncedElevenLabsLogs.length > 0 ? syncedElevenLabsLogs : elevenLabsLogs).forEach(addMergedLog);
   filteredSavedLogs.forEach(addMergedLog);
 
   const merged = Array.from(mergedByKey.values());
@@ -3233,7 +3305,10 @@ app.get("/api/call-logs/:conversationId/audio", requireOwnerAuth, async (req, re
 
   try {
     const audioResponse = await fetch(`https://api.elevenlabs.io/v1/convai/conversations/${encodeURIComponent(conversationId)}/audio`, {
-      headers: { "xi-api-key": apiKey },
+      headers: {
+        "xi-api-key": apiKey,
+        "Accept": "audio/mpeg,audio/*;q=0.9,*/*;q=0.1"
+      },
       signal: AbortSignal.timeout(20_000)
     });
 
@@ -3244,9 +3319,15 @@ app.get("/api/call-logs/:conversationId/audio", requireOwnerAuth, async (req, re
 
     const contentType = audioResponse.headers.get("content-type") || "audio/mpeg";
     const audioBuffer = Buffer.from(await audioResponse.arrayBuffer());
+    if (audioBuffer.length === 0) {
+      return res.status(404).json({ error: "Recording is still empty or not available yet." });
+    }
+
     res.setHeader("Content-Type", contentType);
     res.setHeader("Content-Length", audioBuffer.length);
     res.setHeader("Cache-Control", "private, max-age=300");
+    res.setHeader("Content-Disposition", `inline; filename="${conversationId}.mp3"`);
+    res.setHeader("X-Content-Type-Options", "nosniff");
     return res.send(audioBuffer);
   } catch (error: any) {
     console.warn(`Failed to stream ElevenLabs audio for ${conversationId}:`, error);

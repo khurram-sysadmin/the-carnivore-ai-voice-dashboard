@@ -297,13 +297,24 @@ CREATE POLICY "Allow admin full escalations" ON escalations
 -- 9. CALL LOGS TABLE
 CREATE TABLE IF NOT EXISTS call_logs (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    conversation_id TEXT UNIQUE,
+    agent_id TEXT,
     customer_name TEXT NOT NULL DEFAULT 'Voice Caller',
     customer_phone TEXT NOT NULL DEFAULT 'Active Live Session',
     duration_seconds INTEGER NOT NULL DEFAULT 0,
     transcript TEXT,
+    transcript_summary TEXT,
+    audio_url TEXT,
+    has_audio BOOLEAN NOT NULL DEFAULT FALSE,
+    main_language TEXT,
+    source TEXT NOT NULL DEFAULT 'dashboard',
     status TEXT NOT NULL DEFAULT 'COMPLETED',
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+CREATE INDEX IF NOT EXISTS idx_call_logs_conversation_id ON call_logs(conversation_id);
+CREATE INDEX IF NOT EXISTS idx_call_logs_created_at ON call_logs(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_call_logs_status ON call_logs(status);
 
 ALTER TABLE call_logs ENABLE ROW LEVEL SECURITY;
 
