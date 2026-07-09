@@ -351,11 +351,11 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
     userId: savedCustomerEmail || savedCustomerPhone || undefined,
     dynamicVariables: {
       source_channel: 'web_app',
-      customer_is_logged_in: Boolean(customerAccount),
-      customer_has_saved_contact: hasLoggedInCustomerDetails,
-      customer_name: savedCustomerName,
-      customer_phone: savedCustomerPhone,
-      customer_email: savedCustomerEmail
+      customer_is_logged_in: customerAccount ? 'true' : 'false',
+      customer_has_saved_contact: hasLoggedInCustomerDetails ? 'true' : 'false',
+      customer_name: savedCustomerName || '',
+      customer_phone: savedCustomerPhone || '',
+      customer_email: savedCustomerEmail || ''
     }
   });
 
@@ -576,19 +576,22 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
     if (!customerAccount) return;
 
     const contextLines = [
-      'This is a web app session.',
-      `Customer logged in: ${hasLoggedInCustomerDetails ? 'yes' : 'partial profile'}.`,
-      savedCustomerName ? `Account name: ${savedCustomerName}` : '',
-      savedCustomerPhone ? `Account phone: ${savedCustomerPhone}` : '',
-      savedCustomerEmail ? `Account email: ${savedCustomerEmail}` : '',
+      '=== LOGGED-IN WEB APP CUSTOMER SESSION ===',
+      `Customer is logged in: ${hasLoggedInCustomerDetails ? 'YES' : 'partial profile'}.`,
+      savedCustomerName ? `VERIFIED account name: ${savedCustomerName}` : 'Account name: not provided',
+      savedCustomerPhone ? `VERIFIED account phone: ${savedCustomerPhone}` : 'Account phone: not provided',
+      savedCustomerEmail ? `VERIFIED account email: ${savedCustomerEmail}` : 'Account email: not provided',
+      '',
       hasLoggedInCustomerDetails
-        ? 'Use the account phone and email automatically for every task, including orders, reservations, lookups, modifications, cancellations, menu email, feedback, and escalation. Do not ask for name, phone, or email again unless the customer says the saved account detail is wrong.'
-        : 'If phone or email is missing, ask for only the missing contact detail.',
+        ? 'CRITICAL INSTRUCTION: This customer is logged in. You already have their name, phone, and email above. DO NOT ask for name, phone, or email for ANY task — orders, reservations, lookups, modifications, cancellations, menu email, feedback, and escalation. Use the values above automatically. Only ask if the customer explicitly says the saved detail is wrong.'
+        : 'Some contact details are missing. Ask only for the missing value.',
+      '',
       buildCustomerRecordContext()
     ].filter(Boolean).join('\n');
 
     try {
       voiceConversationRef.current?.sendContextualUpdate(contextLines);
+      console.log('Sent logged-in customer context to Zara:', { name: savedCustomerName, phone: savedCustomerPhone, email: savedCustomerEmail });
     } catch (err) {
       console.warn('Could not send logged-in customer context to Zara:', err);
     }
@@ -598,14 +601,16 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
     if (!customerAccount) return '';
 
     return [
-      'This is a web app text chat session.',
-      `Customer logged in: ${hasLoggedInCustomerDetails ? 'yes' : 'partial profile'}.`,
-      savedCustomerName ? `Account name: ${savedCustomerName}` : '',
-      savedCustomerPhone ? `Account phone: ${savedCustomerPhone}` : '',
-      savedCustomerEmail ? `Account email: ${savedCustomerEmail}` : '',
+      '=== LOGGED-IN WEB APP CUSTOMER TEXT CHAT SESSION ===',
+      `Customer is logged in: ${hasLoggedInCustomerDetails ? 'YES' : 'partial profile'}.`,
+      savedCustomerName ? `VERIFIED account name: ${savedCustomerName}` : 'Account name: not provided',
+      savedCustomerPhone ? `VERIFIED account phone: ${savedCustomerPhone}` : 'Account phone: not provided',
+      savedCustomerEmail ? `VERIFIED account email: ${savedCustomerEmail}` : 'Account email: not provided',
+      '',
       hasLoggedInCustomerDetails
-        ? 'Use the account phone and email automatically for every task. Do not ask for name, phone, or email again unless the customer says the saved account detail is wrong.'
-        : 'If phone or email is missing, ask for only the missing contact detail.',
+        ? 'CRITICAL INSTRUCTION: This customer is logged in. You already have their name, phone, and email above. DO NOT ask for name, phone, or email for ANY task — orders, reservations, lookups, modifications, cancellations, menu email, feedback, and escalation. Use the values above automatically. Only ask if the customer explicitly says the saved detail is wrong.'
+        : 'Some contact details are missing. Ask only for the missing value.',
+      '',
       buildCustomerRecordContext()
     ].filter(Boolean).join('\n');
   };
@@ -806,7 +811,7 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
 
       if (sessionModeRef.current === 'chat') {
         setChatSessionState('connected');
-        sendLoggedInCustomerContext();
+        window.setTimeout(() => sendLoggedInCustomerContext(), 300);
         const pendingMessage = pendingChatMessageRef.current;
         if (pendingMessage) {
           pendingChatMessageRef.current = null;
@@ -821,7 +826,7 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
                 { role: 'zara', content: 'I connected to Zara chat, but could not send your message. Please try again.' }
               ]);
             }
-          }, 0);
+          }, 500);
         }
         return;
       }
@@ -832,7 +837,9 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
       setDetailsFormVisible(false);
       setDetailsSent(false);
       setCallState({ status: 'active', message: 'Connected to Voice Agent Zara' });
-      sendLoggedInCustomerContext();
+      // Delay contextual update slightly so the ElevenLabs agent is fully initialized
+      // and ready to receive the context before its first response.
+      window.setTimeout(() => sendLoggedInCustomerContext(), 300);
     },
     onDisconnect: () => {
       console.log("ElevenLabs Disconnected.", sessionModeRef.current);

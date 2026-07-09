@@ -1550,13 +1550,13 @@ app.post("/api/chat", async (req, res) => {
       functionDeclarations: [
         {
           name: "n8nRestaurantAutomation",
-          description: "FINAL EXECUTION ONLY. Use this tool only after Zara has collected the complete request, read it back to the customer, and the customer explicitly confirms it. Never use this tool as a missing-field checker, partial validator, or price preview.",
+          description: "FINAL EXECUTION ONLY. Use this tool only after Zara has collected the complete active task, read it back to the customer, and the customer explicitly confirms it. Never use this tool as a missing-field checker, partial validator, price preview, or context switch handler. If the customer switches tasks, pause the old task and execute only the current confirmed task. The transcript argument must include only the active task summary and final confirmation, not the full mixed conversation.",
           parameters: {
             type: "OBJECT",
             properties: {
               transcript: {
                 type: "STRING",
-                description: "The full conversation transcript including final customer confirmation."
+                description: "Active task transcript only: include the current task summary and final customer confirmation. Exclude paused tasks, unrelated questions, old reservation details, old order details, and chit-chat."
               },
               intent: {
                 type: "STRING",
@@ -1566,7 +1566,7 @@ app.post("/api/chat", async (req, res) => {
               caller_name: { type: "STRING" },
               customer_email: { type: "STRING" }
             },
-            required: ["transcript"]
+            required: ["intent", "transcript"]
           }
         }
       ]
