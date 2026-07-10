@@ -181,7 +181,10 @@ const transliterateDevanagariWord = (word: string) => {
 };
 
 const formatTranscriptText = (text: string) => {
-  return text.replace(/\s+/g, ' ').trim();
+  // Strip ElevenLabs emotion/expression tags like [happy], [sad], [excited], [angry], [neutral], etc.
+  return text.replace(/\[(?:happy|sad|excited|angry|neutral|surprised|confused|concerned|cheerful|calm|serious|playful|sympathetic|enthusiastic|disappointed|grateful|apologetic|confident|hesitant|curious|amused|relieved|frustrated|empathetic|warm|professional|urgent|gentle|assertive|thoughtful|hopeful|supportive|welcoming|reassuring)\]/gi, '')
+    .replace(/\s+/g, ' ')
+    .trim();
 };
 
 const activeOrderStatusLabels: Array<{ key: Order['status']; label: string }> = [
@@ -573,13 +576,21 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
 
     const contextLines = [
       '=== LOGGED-IN WEB APP CUSTOMER SESSION ===',
-      `Customer is logged in: ${hasLoggedInCustomerDetails ? 'YES' : 'partial profile'}.`,
+      `Customer is logged in: ${hasLoggedInCustomerDetails ? 'YES — FULLY VERIFIED' : 'partial profile'}.`,
       savedCustomerName ? `VERIFIED account name: ${savedCustomerName}` : 'Account name: not provided',
       savedCustomerPhone ? `VERIFIED account phone: ${savedCustomerPhone}` : 'Account phone: not provided',
       savedCustomerEmail ? `VERIFIED account email: ${savedCustomerEmail}` : 'Account email: not provided',
       '',
       hasLoggedInCustomerDetails
-        ? 'CRITICAL INSTRUCTION: This customer is logged in. You already have their name, phone, and email above. DO NOT ask for name, phone, or email for ANY task — orders, reservations, lookups, modifications, cancellations, menu email, feedback, and escalation. Use the values above automatically. Only ask if the customer explicitly says the saved detail is wrong.'
+        ? [
+          'ABSOLUTE RULE — DO NOT VIOLATE:',
+          '1. NEVER ask this customer for their name, phone number, or email address.',
+          '2. NEVER ask to confirm, verify, or re-read their saved email or phone.',
+          '3. NEVER say "mujhe aapka email chahiye" or "aapka email confirm karna hoga" or anything similar.',
+          '4. Use the values above SILENTLY and AUTOMATICALLY for ALL tasks: orders, reservations, lookups, modifications, cancellations, menu email, feedback, and escalation.',
+          '5. In final read-back, say ONLY: "Main aapke account ka phone aur email use karungi." Do NOT spell or display the email.',
+          '6. The ONLY exception: if the customer explicitly says their saved detail is wrong.',
+        ].join('\n')
         : 'Some contact details are missing. Ask only for the missing value.',
       '',
       buildCustomerRecordContext()
@@ -591,6 +602,7 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
     } catch (err) {
       console.warn('Could not send logged-in customer context to Zara:', err);
     }
+
   };
 
   const getLoggedInCustomerContext = () => {
@@ -598,13 +610,21 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
 
     return [
       '=== LOGGED-IN WEB APP CUSTOMER TEXT CHAT SESSION ===',
-      `Customer is logged in: ${hasLoggedInCustomerDetails ? 'YES' : 'partial profile'}.`,
+      `Customer is logged in: ${hasLoggedInCustomerDetails ? 'YES — FULLY VERIFIED' : 'partial profile'}.`,
       savedCustomerName ? `VERIFIED account name: ${savedCustomerName}` : 'Account name: not provided',
       savedCustomerPhone ? `VERIFIED account phone: ${savedCustomerPhone}` : 'Account phone: not provided',
       savedCustomerEmail ? `VERIFIED account email: ${savedCustomerEmail}` : 'Account email: not provided',
       '',
       hasLoggedInCustomerDetails
-        ? 'CRITICAL INSTRUCTION: This customer is logged in. You already have their name, phone, and email above. DO NOT ask for name, phone, or email for ANY task — orders, reservations, lookups, modifications, cancellations, menu email, feedback, and escalation. Use the values above automatically. Only ask if the customer explicitly says the saved detail is wrong.'
+        ? [
+          'ABSOLUTE RULE — DO NOT VIOLATE:',
+          '1. NEVER ask this customer for their name, phone number, or email address.',
+          '2. NEVER ask to confirm, verify, or re-read their saved email or phone.',
+          '3. NEVER say "mujhe aapka email chahiye" or "aapka email confirm karna hoga" or anything similar.',
+          '4. Use the values above SILENTLY and AUTOMATICALLY for ALL tasks: orders, reservations, lookups, modifications, cancellations, menu email, feedback, and escalation.',
+          '5. In final read-back, say ONLY: "Main aapke account ka phone aur email use karungi." Do NOT spell or display the email.',
+          '6. The ONLY exception: if the customer explicitly says their saved detail is wrong.',
+        ].join('\n')
         : 'Some contact details are missing. Ask only for the missing value.',
       '',
       buildCustomerRecordContext()
@@ -994,26 +1014,55 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
               (lowerText.includes('email') || lowerText.includes('mail')) &&
               (lowerText.includes('below') || lowerText.includes('neeche') || lowerText.includes('niche') || lowerText.includes('bhar') || lowerText.includes('likh') || lowerText.includes('send'))
             );
-          const contactQuestion =
-            (
-              lowerText.includes('phone number') ||
-              lowerText.includes('mobile number') ||
-              lowerText.includes('contact number') ||
-              lowerText.includes('email address') ||
-              lowerText.includes('phone aur email') ||
-              lowerText.includes('number aur email') ||
-              lowerText.includes('mail address')
-            ) &&
-            (
-              lowerText.includes('please') ||
-              lowerText.includes('could you') ||
-              lowerText.includes('can you') ||
-              lowerText.includes('provide') ||
-              lowerText.includes('share') ||
-              lowerText.includes('need') ||
-              lowerText.includes('what is') ||
-              lowerText.endsWith('?')
-            );
+          // Detect contact-info keywords in Zara's response
+          const mentionsContact =
+            lowerText.includes('phone number') ||
+            lowerText.includes('mobile number') ||
+            lowerText.includes('contact number') ||
+            lowerText.includes('email address') ||
+            lowerText.includes('email chahiye') ||
+            lowerText.includes('email chahie') ||
+            lowerText.includes('phone aur email') ||
+            lowerText.includes('number aur email') ||
+            lowerText.includes('mail address') ||
+            lowerText.includes('aapka email') ||
+            lowerText.includes('apka email') ||
+            lowerText.includes('aapka phone') ||
+            lowerText.includes('apka phone') ||
+            lowerText.includes('email de dein') ||
+            lowerText.includes('email bata') ||
+            lowerText.includes('phone bata') ||
+            lowerText.includes('email confirm') ||
+            lowerText.includes('phone confirm');
+          // English polite patterns
+          const englishAskPattern =
+            lowerText.includes('please') ||
+            lowerText.includes('could you') ||
+            lowerText.includes('can you') ||
+            lowerText.includes('provide') ||
+            lowerText.includes('share') ||
+            lowerText.includes('need') ||
+            lowerText.includes('what is') ||
+            lowerText.endsWith('?');
+          // Urdu/Hinglish polite/request patterns (the ROOT FIX)
+          const urduAskPattern =
+            lowerText.includes('chahiye') ||
+            lowerText.includes('chahie') ||
+            lowerText.includes('batayein') ||
+            lowerText.includes('bata dein') ||
+            lowerText.includes('bata do') ||
+            lowerText.includes('batao') ||
+            lowerText.includes('de dein') ||
+            lowerText.includes('de do') ||
+            lowerText.includes('dein') ||
+            lowerText.includes('dijiye') ||
+            lowerText.includes('kr dein') ||
+            lowerText.includes('kar dein') ||
+            lowerText.includes('confirm karna') ||
+            lowerText.includes('confirm krna') ||
+            lowerText.includes('mujhe') ||
+            lowerText.includes('mujhy');
+          const contactQuestion = mentionsContact && (englishAskPattern || urduAskPattern);
           const asksForContact =
             speaker === 'Zara' &&
             (callbackFormRequest || explicitContactFormRequest || contactQuestion);

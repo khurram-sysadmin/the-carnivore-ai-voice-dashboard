@@ -1257,6 +1257,40 @@ const speakerFromTranscriptEntry = (entry: any) => {
   return "Zara";
 };
 
+const isInternalWebAppTranscriptText = (text: string) => {
+  return (
+    text.includes("INTERNAL_WEB_APP_CONTEXT:") ||
+    text.includes("The logged-in web app account already has verified contact details.") ||
+    text.includes("The logged-in web app account already has the manager callback details.") ||
+    text.includes("Account contact details supplied automatically.") ||
+    text.includes("Account callback details supplied automatically.")
+  );
+};
+
+const cleanTranscriptString = (transcript: string) => {
+  const visibleLines: string[] = [];
+  let skippingInternalDetails = false;
+
+  for (const line of transcript.split("\n")) {
+    if (isInternalWebAppTranscriptText(line)) {
+      skippingInternalDetails = true;
+      continue;
+    }
+
+    if (
+      skippingInternalDetails &&
+      /^(?:(?:You|Customer)\s*:\s*)?(?:Name|Phone|Email)\s*:/i.test(line.trim())
+    ) {
+      continue;
+    }
+
+    skippingInternalDetails = false;
+    visibleLines.push(line);
+  }
+
+  return visibleLines.join("\n").trim();
+};
+
 const formatElevenLabsTranscript = (conversation: any) => {
   const transcriptCandidates = [
     conversation?.transcript,
@@ -1269,13 +1303,17 @@ const formatElevenLabsTranscript = (conversation: any) => {
   ];
 
   for (const transcript of transcriptCandidates) {
-    if (typeof transcript === "string" && transcript.trim()) return transcript.trim();
+    if (typeof transcript === "string" && transcript.trim()) {
+      const cleanedTranscript = cleanTranscriptString(transcript);
+      if (cleanedTranscript) return cleanedTranscript;
+      continue;
+    }
     if (!Array.isArray(transcript)) continue;
 
     const lines = transcript
       .map((entry: any) => {
         const text = textFromTranscriptEntry(entry);
-        if (!text) return "";
+        if (!text || isInternalWebAppTranscriptText(text)) return "";
         return `${speakerFromTranscriptEntry(entry)}: ${text}`;
       })
       .filter(Boolean);
