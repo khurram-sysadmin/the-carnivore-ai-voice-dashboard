@@ -5,6 +5,7 @@ import dotenv from "dotenv";
 import crypto from "crypto";
 import { createClient } from "@supabase/supabase-js";
 import { GoogleGenAI } from "@google/genai";
+import { formatTranscriptText } from "./src/utils/transcript";
 
 dotenv.config();
 
@@ -1304,7 +1305,10 @@ const formatElevenLabsTranscript = (conversation: any) => {
 
   for (const transcript of transcriptCandidates) {
     if (typeof transcript === "string" && transcript.trim()) {
-      const cleanedTranscript = cleanTranscriptString(transcript);
+      const cleanedTranscript = cleanTranscriptString(transcript)
+        .split("\n")
+        .map(line => formatTranscriptText(line))
+        .join("\n");
       if (cleanedTranscript) return cleanedTranscript;
       continue;
     }
@@ -1312,7 +1316,7 @@ const formatElevenLabsTranscript = (conversation: any) => {
 
     const lines = transcript
       .map((entry: any) => {
-        const text = textFromTranscriptEntry(entry);
+        const text = formatTranscriptText(textFromTranscriptEntry(entry));
         if (!text || isInternalWebAppTranscriptText(text)) return "";
         return `${speakerFromTranscriptEntry(entry)}: ${text}`;
       })

@@ -4,6 +4,7 @@ import { Phone, PhoneOff, Sparkles, RefreshCw, CheckCircle2, AlertCircle, Volume
 import { useConversation } from '@elevenlabs/react';
 import { TextConversation } from '@elevenlabs/client';
 import type { Order, Reservation } from '../types';
+import { formatTranscriptText as normalizeTranscriptText } from '../utils/transcript';
 
 interface CallZaraWidgetProps {
   onRecordCreated: (record?: any) => void;
@@ -181,10 +182,7 @@ const transliterateDevanagariWord = (word: string) => {
 };
 
 const formatTranscriptText = (text: string) => {
-  // Strip ElevenLabs emotion/expression tags like [happy], [sad], [excited], [angry], [neutral], etc.
-  return text.replace(/\[(?:happy|sad|excited|angry|neutral|surprised|confused|concerned|cheerful|calm|serious|playful|sympathetic|enthusiastic|disappointed|grateful|apologetic|confident|hesitant|curious|amused|relieved|frustrated|empathetic|warm|professional|urgent|gentle|assertive|thoughtful|hopeful|supportive|welcoming|reassuring)\]/gi, '')
-    .replace(/\s+/g, ' ')
-    .trim();
+  return normalizeTranscriptText(text);
 };
 
 const activeOrderStatusLabels: Array<{ key: Order['status']; label: string }> = [
