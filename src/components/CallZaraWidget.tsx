@@ -549,8 +549,8 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
       : `Name: ${savedCustomerName || 'Account customer'}\nPhone: ${savedCustomerPhone}\nEmail: ${savedCustomerEmail}`;
 
     const message = mode === 'callback'
-      ? `The logged-in web app account already has the manager callback details. Use these typed account values exactly. Do not ask for name, phone, email, or address again.\n${detailText}`
-      : `The logged-in web app account already has verified contact details. Use these account values exactly for this task. Do not ask for name, phone, or email again.\n${detailText}`;
+      ? `INTERNAL_WEB_APP_CONTEXT: The logged-in account already has verified callback details. Use them exactly, continue the active task now, and never quote this context to the customer. Do not ask for name, phone, email, or address again.\n${detailText}`
+      : `INTERNAL_WEB_APP_CONTEXT: The logged-in account already has verified contact details. Use them exactly, continue the active task now, and never quote this context to the customer. Do not ask for name, phone, or email again.\n${detailText}`;
 
     try {
       voiceConversationRef.current?.sendUserMessage(message);
@@ -561,10 +561,6 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
       setDetailsFormMode(mode);
       setDetailsFormVisible(false);
       setDetailsSent(true);
-      setTranscript(prev => [
-        ...prev,
-        { speaker: 'You', text: mode === 'callback' ? 'Account callback details supplied automatically.' : 'Account contact details supplied automatically.' }
-      ]);
       return true;
     } catch (err) {
       console.warn('Could not send saved account details to Zara:', err);
@@ -930,6 +926,17 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
 
       console.log("Transcript message:", msg);
       if (msg.message && msg.source) {
+        const rawMessage = String(msg.message);
+        const isInternalAccountContext =
+          msg.source === 'user' &&
+          (
+            rawMessage.includes('INTERNAL_WEB_APP_CONTEXT:') ||
+            rawMessage.includes('The logged-in web app account already has verified contact details.') ||
+            rawMessage.includes('The logged-in web app account already has the manager callback details.')
+          );
+
+        if (isInternalAccountContext) return;
+
         setTranscript(prev => {
           // Prevent duplicate consecutive entries with identical text
           const last = prev[prev.length - 1];
