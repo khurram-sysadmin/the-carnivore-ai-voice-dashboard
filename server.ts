@@ -1526,7 +1526,7 @@ app.post("/api/chat", async (req, res) => {
     const ai = new GoogleGenAI({ apiKey });
     
     // Load Zara system instructions and menu knowledge
-    let systemInstruction = "You are Zara, the professional restaurant voice agent for The Carnivore.";
+    let systemInstruction = "You are Zara, the professional restaurant voice agent for The Carnivore. Reply only in natural Roman Urdu/Hinglish.";
     try {
       const promptPath = path.join(process.cwd(), "elevenlabs_zara_system_prompt.txt");
       const menuPath = path.join(process.cwd(), "elevenlabs_menu_knowledge.md");
@@ -1608,7 +1608,7 @@ app.post("/api/chat", async (req, res) => {
               n8nResponse = {
                 success: false,
                 error: errMsg,
-                spoken_response: `I'm sorry, but your request could not be completed. Error details: ${errMsg}`
+                spoken_response: `Sorry, ye request abhi complete nahi ho saki. Reason: ${errMsg}`
               };
             }
           } catch (err: any) {
@@ -1616,7 +1616,7 @@ app.post("/api/chat", async (req, res) => {
             n8nResponse = {
               success: false,
               error: err.message || "Failed to contact automation server.",
-              spoken_response: "I'm sorry, but your request could not be completed due to a connection issue with the automation server."
+              spoken_response: "Sorry, automation server se connection issue aa raha hai. Thori der baad dobara try karein."
             };
           }
         } else {
@@ -1624,7 +1624,7 @@ app.post("/api/chat", async (req, res) => {
           n8nResponse = {
             success: false,
             error: "Chat automation is not configured. Please set the N8N_WEBHOOK_URL environment variable on the server.",
-            spoken_response: "I'm sorry, but I cannot complete this request because the chat automation is not configured on the server."
+            spoken_response: "Sorry, chat automation abhi configure nahi hai, is liye request complete nahi ho sakti."
           };
         }
  

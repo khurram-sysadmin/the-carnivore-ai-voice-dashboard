@@ -385,8 +385,8 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
       '- Default broad reservation summaries count only CONFIRMED, MODIFIED, and CANCELLED reservations.',
       '- Do not count or mention COMPLETED or NO_SHOW reservations unless the customer asks for completed, no-show, past, history, or all reservations.',
       '- In broad replies, never list or suggest order IDs or booking IDs unless the customer explicitly asks for IDs or numbers.',
-      '- For broad order questions, say only: You have [number] active orders. Please tell me your order ID to know about your order.',
-      '- For broad reservation questions, say only: You have [number] reservations. Please tell me your booking ID to know about your reservation.',
+      '- For broad order questions, say only in Roman Urdu/Hinglish: Aapke [number] active orders hain. Apne order ki details ke liye order ID bata dein.',
+      '- For broad reservation questions, say only in Roman Urdu/Hinglish: Aapki [number] reservations hain. Details ke liye booking ID bata dein.',
       '- If the customer explicitly asks for active order IDs, active reservation IDs, or record numbers, list only the requested IDs without item details.',
       '- If the customer gives an ID or identifying detail, match it against the listed records. If multiple records match, ask a short clarifying question.',
       `Default active orders total: ${activeOrderRecords.length}. Active order status counts: ${summarizeCounts(activeOrderRecords, activeOrderStatusLabels)}.`,
@@ -477,12 +477,12 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
 
       if (matches.length === 1) {
         const order = matches[0];
-        return `${formatRecordNumber('ORD', order.order_number)} is ${order.status.toLowerCase().replaceAll('_', ' ')}. Items: ${formatOrderItems(order)}. Total: ${formatCurrency(order.total_amount)}. Order type: ${order.order_type || 'not set'}.`;
+        return `${formatRecordNumber('ORD', order.order_number)} ka status ${order.status.toLowerCase().replaceAll('_', ' ')} hai. Items: ${formatOrderItems(order)}. Total: ${formatCurrency(order.total_amount)}. Order type: ${order.order_type || 'not set'}.`;
       }
 
       if (matches.length > 1) {
         const choices = matches.slice(0, 4).map(order => `${formatRecordNumber('ORD', order.order_number)} (${order.status.toLowerCase().replaceAll('_', ' ')}, ${formatOrderItems(order)}, ${formatCurrency(order.total_amount)})`).join('; ');
-        return `I found ${matches.length} matching orders: ${choices}. Which order do you want details for? Please share the order ID.`;
+        return `Mujhe ${matches.length} matching orders mile: ${choices}. Kis order ki details chahie? Order ID bata dein.`;
       }
 
       if (queryLooksBroad(query) || !hasSpecificSignal) {
@@ -494,11 +494,11 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
         if (queryAsksForRecordIds(query, 'order')) {
           const ids = visibleOrders.map(order => formatRecordNumber('ORD', order.order_number)).join(', ');
           return visibleOrders.length
-            ? `Your ${includeHistory ? 'order' : 'active order'} IDs are ${ids}. Which one do you want details for?`
-            : `You have no ${includeHistory ? 'orders' : 'active orders'} right now.`;
+            ? `Aapke ${includeHistory ? 'order' : 'active order'} IDs hain: ${ids}. Kis order ki details chahie?`
+            : `Abhi aapka koi ${includeHistory ? 'order' : 'active order'} nahi hai.`;
         }
 
-        return `You have ${visibleOrders.length} ${includeHistory ? 'orders' : 'active orders'}. Please tell me your order ID to know about your order.`;
+        return `Aapke ${visibleOrders.length} ${includeHistory ? 'orders' : 'active orders'} hain. Apne order ki details ke liye order ID bata dein.`;
       }
     }
 
@@ -508,12 +508,12 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
 
       if (matches.length === 1) {
         const reservation = matches[0];
-        return `${formatRecordNumber('RES', reservation.reservation_number)} is ${reservation.status.toLowerCase().replaceAll('_', ' ')} for ${formatDateForZara(reservation.reservation_date)} at ${formatTimeForZara(reservation.reservation_time)} for ${reservation.party_size} guests.`;
+        return `${formatRecordNumber('RES', reservation.reservation_number)} ${reservation.status.toLowerCase().replaceAll('_', ' ')} hai, ${formatDateForZara(reservation.reservation_date)} ko ${formatTimeForZara(reservation.reservation_time)} par ${reservation.party_size} guests ke liye.`;
       }
 
       if (matches.length > 1) {
         const choices = matches.slice(0, 4).map(reservation => `${formatRecordNumber('RES', reservation.reservation_number)} (${reservation.status.toLowerCase().replaceAll('_', ' ')}, ${formatDateForZara(reservation.reservation_date)} ${formatTimeForZara(reservation.reservation_time)}, ${reservation.party_size} guests)`).join('; ');
-        return `I found ${matches.length} matching reservations: ${choices}. Which reservation do you want details for? Please share the booking ID.`;
+        return `Mujhe ${matches.length} matching reservations milin: ${choices}. Kis reservation ki details chahie? Booking ID bata dein.`;
       }
 
       if (queryLooksBroad(query) || !hasSpecificSignal) {
@@ -525,11 +525,11 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
         if (queryAsksForRecordIds(query, 'reservation')) {
           const ids = visibleReservations.map(reservation => formatRecordNumber('RES', reservation.reservation_number)).join(', ');
           return visibleReservations.length
-            ? `Your reservation IDs are ${ids}. Which one do you want details for?`
-            : `You have no reservations right now.`;
+            ? `Aapki reservation IDs hain: ${ids}. Kis reservation ki details chahie?`
+            : `Abhi aapki koi reservation nahi hai.`;
         }
 
-        return `You have ${visibleReservations.length} reservations. Please tell me your booking ID to know about your reservation.`;
+        return `Aapki ${visibleReservations.length} reservations hain. Details ke liye booking ID bata dein.`;
       }
     }
 
@@ -950,6 +950,10 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
             lowerText.includes('fill name and phone number below') ||
             lowerText.includes('type your name and phone number below') ||
             lowerText.includes('type the name and phone number below') ||
+            lowerText.includes('apna naam aur phone number fill') ||
+            lowerText.includes('naam aur phone number fill') ||
+            lowerText.includes('name aur phone number fill') ||
+            lowerText.includes('naam aur number fill') ||
             (
               isEscalationContext &&
               (lowerText.includes('phone number') || lowerText.includes('contact number') || lowerText.includes('mobile number')) &&
@@ -973,6 +977,11 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
             lowerText.includes('phone/email') ||
             lowerText.includes('email below') ||
             lowerText.includes('phone below') ||
+            lowerText.includes('phone number aur email fill') ||
+            lowerText.includes('phone aur email fill') ||
+            lowerText.includes('number aur email fill') ||
+            lowerText.includes('email fill kar dein') ||
+            lowerText.includes('email fill kr dein') ||
             (
               (lowerText.includes('phone') || lowerText.includes('number')) &&
               (lowerText.includes('email') || lowerText.includes('mail')) &&
