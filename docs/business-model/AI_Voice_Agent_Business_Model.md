@@ -1,6 +1,6 @@
 # AI Voice Agent Agency Business Model
 
-> Pricing note: the original pricing tables in this research document have been superseded by `Exact Setup Fees and Profit Model v2.md` and `AI_Voice_Agent_Exact_Unit_Economics_v2.xlsx`. Use v2 for quotations and profit decisions.
+> Pricing note: the original pricing tables in this research document have been superseded by `Complete USD Business Model v3.md` and `AI_Voice_Agent_Complete_USD_Model_v3.xlsx`. Use v3 for quotations and profit decisions.
 
 Research and planning date: 13 July 2026  
 Product reference: The Carnivore AI Voice Dashboard  

@@ -1,5 +1,7 @@
 # Exact Setup Fees and Profit Model v2
 
+> Superseded by `Complete USD Business Model v3.md` and `AI_Voice_Agent_Complete_USD_Model_v3.xlsx`, which add paid n8n AI processing and Twilio.
+
 Research and calculation date: 13 July 2026
 
 ## Meaning of “exact”
@@ -172,4 +174,3 @@ Scale produces the strongest recurring economics because volume is large enough 
 - ECB EUR/USD reference: https://www.ecb.europa.eu/stats/policy_and_exchange_rates/euro_reference_exchange_rates/html/index.en.html
 - WildRun managed receptionist benchmark: https://wildrunai.com/pricing
 - Clutch AI development benchmark: https://clutch.co/developers/artificial-intelligence/pricing
-
