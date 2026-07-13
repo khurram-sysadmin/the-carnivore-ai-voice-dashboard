@@ -1,5 +1,7 @@
 # AI Voice Agent Agency Business Model
 
+> Pricing note: the original pricing tables in this research document have been superseded by `Exact Setup Fees and Profit Model v2.md` and `AI_Voice_Agent_Exact_Unit_Economics_v2.xlsx`. Use v2 for quotations and profit decisions.
+
 Research and planning date: 13 July 2026  
 Product reference: The Carnivore AI Voice Dashboard  
 Planning exchange rate: USD 1 = PKR 280 (editable; refresh before issuing quotations)
@@ -368,4 +370,3 @@ Aim for the monthly fee to be no more than 20%–35% of conservatively measured 
 Use the **Growth tier at $997/month globally or PKR 225,000/month locally** as the main offer, not the cheapest tier. It gives enough budget for reliable operations, real support, and measurable improvement while remaining far below custom AI project pricing and comparable managed reception services. Lead with a one-location paid pilot, prove completed orders/reservations and revenue, then expand by location and channel.
 
 The Excel workbook next to this document is the operating model. Update its assumptions before every major proposal and review the vendor-source sheet quarterly.
-
