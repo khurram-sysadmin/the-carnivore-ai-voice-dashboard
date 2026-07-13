@@ -27,3 +27,15 @@ Zara conversations run through ElevenLabs, not Gemini:
 ## Build
 
 Run `npm run build` before deploying.
+
+## Production ElevenLabs Configuration
+
+The application reads the agent configuration from server-side environment variables. In Vercel, define these values for Production, Preview, and Development:
+
+- `ELEVENLABS_AGENT_ID`
+- `VITE_ELEVENLABS_AGENT_ID`
+- `ELEVENLABS_API_KEY`
+
+Both agent-ID variables should identify the same ElevenLabs agent. Keep the API key only in Vercel or a local ignored `.env` file; never commit it.
+
+The current production agent is Zara (`Carnivore Voice Agent`). Its ElevenLabs-side configuration includes the restaurant system prompt, menu knowledge base, n8n webhook tool, authenticated conversation sessions, and the end-call system tool.
